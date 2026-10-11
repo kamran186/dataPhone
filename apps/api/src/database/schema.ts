@@ -84,6 +84,20 @@ const indexes: Record<string, IndexDescription[]> = {
       name: "ix_number_events_history",
       key: { phoneNumberId: 1, createdAt: -1 },
     },
+    {
+      name: "ix_number_events_customer",
+      key: { customerId: 1, createdAt: -1 },
+    },
+    {
+      name: "ix_number_events_related_customer",
+      key: { relatedCustomerIds: 1, createdAt: -1 },
+    },
+    {
+      name: "uq_number_events_sequence",
+      key: { sequence: 1 },
+      unique: true,
+      partialFilterExpression: { sequence: { $exists: true } },
+    },
   ],
   purchase_orders: [
     {
@@ -166,6 +180,13 @@ export async function initializeCoreSchema(db: Db): Promise<void> {
   for (const name of coreCollections) {
     await db.collection(name).createIndexes(indexes[name]);
   }
+  await db
+    .collection("audit_chain_heads")
+    .updateOne(
+      { _id: "global" as never },
+      { $setOnInsert: { sequence: 0, hash: "0".repeat(64) } },
+      { upsert: true },
+    );
   await db.collection("schema_migrations").updateOne(
     { _id: "core-v1" as never },
     {

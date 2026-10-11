@@ -36,4 +36,6 @@ The [background jobs report](docs/implementation/phase-5-report.md) describes du
 
 The [inventory report](docs/implementation/phase-6-report.md) describes carrier accounts, scheduled and manual synchronization, reconciliation, search, and exports. Add a carrier account with `POST /api/v1/carriers/{carrierId}/accounts` using an external account ID and an environment variable name as `credentialRef`. The sync endpoint takes the resulting **account ID**. Only Bandwidth read-only inventory is enabled for live carrier access; Peerless and BulkVS remain unavailable pending contracts.
 
+The [customer and assignment report](docs/implementation/phase-7-report.md) describes customer records, number ownership, transfer history, and audited changes. Authorized staff can assign from a number detail page or select inventory rows for a bulk assignment.
+
 Quality checks: `pnpm typecheck`, `pnpm lint`, `pnpm format:check`, `pnpm test`, and `pnpm build`.

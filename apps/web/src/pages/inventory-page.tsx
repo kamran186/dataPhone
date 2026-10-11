@@ -1,7 +1,14 @@
 import {
   Alert,
   Button,
+  Checkbox,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  FormControl,
+  InputLabel,
   MenuItem,
   Paper,
   Select,
@@ -52,6 +59,7 @@ interface CarrierRow {
 export function InventoryPage() {
   const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
+  const canAssign = Boolean(user?.permissions.includes("numbers.assign"));
   const [search, setSearch] = useState("");
   const [customer, setCustomer] = useState("");
   const [carrier, setCarrier] = useState("");
@@ -59,6 +67,13 @@ export function InventoryPage() {
   const [sort, setSort] = useState("e164");
   const [page, setPage] = useState(1);
   const [notice, setNotice] = useState("");
+  const [selected, setSelected] = useState<string[]>([]);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [selectedCustomer, setSelectedCustomer] = useState("");
+  const [bulkError, setBulkError] = useState("");
+  const customerParams = new URLSearchParams({ page: "1", pageSize: "100" });
+  if (customerSearch.length >= 2) customerParams.set("search", customerSearch);
   const params = new URLSearchParams({
     page: String(page),
     pageSize: "50",
@@ -91,6 +106,47 @@ export function InventoryPage() {
         "/api/v1/reconciliation/issues?status=open",
       ),
   });
+  const customers = useQuery({
+    queryKey: ["assignment-customers", customerParams.toString()],
+    enabled: canAssign && bulkOpen,
+    queryFn: () =>
+      getJson<{ items: Array<{ id: string; name: string; status: string }> }>(
+        `/api/v1/customers?${customerParams}`,
+      ),
+  });
+
+  function toggleNumber(id: string) {
+    setSelected((current) =>
+      current.includes(id)
+        ? current.filter((item) => item !== id)
+        : [...current, id],
+    );
+  }
+
+  async function bulkAssign() {
+    setBulkError("");
+    try {
+      const response = await authorizedFetch("/api/v1/assignments/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          numberIds: selected,
+          customerId: selectedCustomer,
+        }),
+      });
+      if (!response.ok)
+        throw new Error(`Bulk assignment failed (${response.status})`);
+      setBulkOpen(false);
+      setSelected([]);
+      setSelectedCustomer("");
+      setNotice("Assignment completed for selected numbers.");
+      await queryClient.invalidateQueries({ queryKey: ["numbers"] });
+    } catch (error) {
+      setBulkError(
+        error instanceof Error ? error.message : "Bulk assignment failed",
+      );
+    }
+  }
 
   async function exportFile(format: "csv" | "xlsx") {
     try {
@@ -134,7 +190,12 @@ export function InventoryPage() {
       />
       {notice && (
         <Alert
-          severity={notice.startsWith("Synchronization") ? "success" : "error"}
+          severity={
+            notice.startsWith("Synchronization") ||
+            notice.startsWith("Assignment")
+              ? "success"
+              : "error"
+          }
         >
           {notice}
         </Alert>
@@ -217,6 +278,7 @@ export function InventoryPage() {
           <Table aria-label="Inventory numbers">
             <TableHead>
               <TableRow>
+                {canAssign && <TableCell>Select</TableCell>}
                 <TableCell>Number</TableCell>
                 <TableCell>Status</TableCell>
                 <TableCell>Carrier</TableCell>
@@ -227,6 +289,21 @@ export function InventoryPage() {
             <TableBody>
               {numbers.data.items.map((number) => (
                 <TableRow key={number.id}>
+                  {canAssign && (
+                    <TableCell>
+                      <Checkbox
+                        disabled={
+                          number.status !== "active" ||
+                          Boolean(number.customerName)
+                        }
+                        checked={selected.includes(number.id)}
+                        onChange={() => toggleNumber(number.id)}
+                        slotProps={{
+                          input: { "aria-label": `Select ${number.e164}` },
+                        }}
+                      />
+                    </TableCell>
+                  )}
                   <TableCell>
                     <Link to={`/inventory/${number.id}`}>{number.e164}</Link>
                   </TableCell>
@@ -240,6 +317,18 @@ export function InventoryPage() {
               ))}
             </TableBody>
           </Table>
+          {canAssign && (
+            <Button
+              sx={{ m: 2 }}
+              disabled={selected.length === 0}
+              onClick={() => {
+                setBulkError("");
+                setBulkOpen(true);
+              }}
+            >
+              Assign selected
+            </Button>
+          )}
           {numbers.data.items.length === 0 && (
             <Typography sx={{ p: 2 }}>
               No numbers match these filters.
@@ -301,6 +390,55 @@ export function InventoryPage() {
           {issues.data.length} open reconciliation issues need review.
         </Alert>
       )}
+      <Dialog
+        open={bulkOpen}
+        onClose={() => setBulkOpen(false)}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle>Assign {selected.length} selected numbers</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField
+              label="Find customer"
+              value={customerSearch}
+              onChange={(event) => setCustomerSearch(event.target.value)}
+            />
+            <FormControl fullWidth>
+              <InputLabel htmlFor="bulk-customer">Customer</InputLabel>
+              <Select
+                native
+                label="Customer"
+                inputProps={{ id: "bulk-customer", "aria-label": "Customer" }}
+                value={selectedCustomer}
+                onChange={(event) =>
+                  setSelectedCustomer(String(event.target.value))
+                }
+              >
+                <option value="">Select a customer</option>
+                {customers.data?.items
+                  .filter((item) => item.status === "active")
+                  .map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}
+                    </option>
+                  ))}
+              </Select>
+            </FormControl>
+            {bulkError && <Alert severity="error">{bulkError}</Alert>}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setBulkOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            disabled={!selectedCustomer}
+            onClick={() => void bulkAssign()}
+          >
+            Confirm bulk assignment
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Stack>
   );
 }

@@ -5,6 +5,7 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { AppLayout } from "./layout/app-layout";
 import { RequireAuth, RequirePermission } from "./require-auth";
 import { CustomersPage } from "../pages/customers-page";
+import { CustomerDetailPage } from "../pages/customer-detail-page";
 import { InventoryPage } from "../pages/inventory-page";
 import { NumberDetailPage } from "../pages/number-detail-page";
 import { JobsPage } from "../pages/jobs-page";
@@ -65,6 +66,14 @@ export function App() {
                   element={
                     <RequirePermission permission="customers.view">
                       <CustomersPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="customers/:id"
+                  element={
+                    <RequirePermission permission="customers.view">
+                      <CustomerDetailPage />
                     </RequirePermission>
                   }
                 />

@@ -21,6 +21,12 @@ import {
 } from "./inventory/inventory.controller";
 import { InventoryJobs } from "./inventory/inventory.jobs";
 import { InventoryService } from "./inventory/inventory.service";
+import { AuditService } from "./ownership/audit.service";
+import { AssignmentsController } from "./ownership/assignments.controller";
+import { AssignmentsService } from "./ownership/assignments.service";
+import { CustomersController } from "./ownership/customers.controller";
+import { CustomersService } from "./ownership/customers.service";
+import { HistoryController } from "./ownership/history.controller";
 import { SystemController } from "./system/system.controller";
 
 @Module({
@@ -35,6 +41,9 @@ import { SystemController } from "./system/system.controller";
     JobWorker,
     InventoryService,
     InventoryJobs,
+    AuditService,
+    CustomersService,
+    AssignmentsService,
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
   ],
@@ -48,6 +57,9 @@ import { SystemController } from "./system/system.controller";
     NumbersController,
     CarriersController,
     ReconciliationController,
+    CustomersController,
+    AssignmentsController,
+    HistoryController,
   ],
 })
 export class AppModule {}

@@ -1,13 +1,24 @@
 import {
   Alert,
+  Button,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  FormControl,
+  InputLabel,
   Paper,
+  Select,
   Stack,
+  TextField,
   Typography,
 } from "@mui/material";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { getJson } from "../shared/api/client";
+import { useAuthStore } from "../app/model/use-auth-store";
+import { authorizedFetch, getJson } from "../shared/api/client";
 
 interface NumberDetail {
   e164: string;
@@ -17,16 +28,114 @@ interface NumberDetail {
   firstSeenAt: string;
   lastSeenAt: string;
   holdings: Array<{ status: string; startedAt: string; endedAt?: string }>;
-  assignments: Array<{ customerId: string; active: boolean }>;
+  assignments: Array<{
+    customerId: string;
+    active: boolean;
+    startedAt?: string;
+    endedAt?: string;
+  }>;
+}
+interface CustomerRow {
+  id: string;
+  name: string;
+  status: string;
+}
+interface HistoryEvent {
+  id: string;
+  type: string;
+  actorId: string;
+  createdAt: string;
+  previous: unknown;
+  next: unknown;
 }
 
 export function NumberDetailPage() {
   const { id } = useParams();
+  const queryClient = useQueryClient();
+  const user = useAuthStore((state) => state.user);
+  const canAssign = Boolean(user?.permissions.includes("numbers.assign"));
+  const canAudit = Boolean(user?.permissions.includes("audit.view"));
+  const [dialog, setDialog] = useState<
+    "assign" | "transfer" | "unassign" | null
+  >(null);
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [selectedCustomer, setSelectedCustomer] = useState("");
+  const [error, setError] = useState("");
+  const [historyType, setHistoryType] = useState("");
+  const [historyFrom, setHistoryFrom] = useState("");
+  const [historyTo, setHistoryTo] = useState("");
+  const [historyPage, setHistoryPage] = useState(1);
+  const customerParams = new URLSearchParams({ page: "1", pageSize: "100" });
+  if (customerSearch.length >= 2) customerParams.set("search", customerSearch);
+  const historyParams = new URLSearchParams({
+    page: String(historyPage),
+    pageSize: "25",
+  });
+  if (historyType) historyParams.set("type", historyType);
+  if (historyFrom) historyParams.set("from", historyFrom);
+  if (historyTo) historyParams.set("to", historyTo);
   const detail = useQuery({
     queryKey: ["number", id],
     enabled: Boolean(id),
     queryFn: () => getJson<NumberDetail>(`/api/v1/numbers/${id}`),
   });
+  const customers = useQuery({
+    queryKey: ["assignment-customers", customerParams.toString()],
+    enabled: canAssign,
+    queryFn: () =>
+      getJson<{ items: CustomerRow[] }>(`/api/v1/customers?${customerParams}`),
+  });
+  const history = useQuery({
+    queryKey: ["number-history", id, historyParams.toString()],
+    enabled: Boolean(id && canAudit),
+    queryFn: () =>
+      getJson<{ items: HistoryEvent[]; total: number; pageSize: number }>(
+        `/api/v1/numbers/${id}/history?${historyParams}`,
+      ),
+  });
+  const active = detail.data?.assignments.find(
+    (assignment) => assignment.active,
+  );
+  const activeName = customers.data?.items.find(
+    (customer) => customer.id === active?.customerId,
+  )?.name;
+
+  async function submit() {
+    if (!dialog) return;
+    setError("");
+    try {
+      const path =
+        dialog === "assign"
+          ? "/api/v1/assignments"
+          : `/api/v1/assignments/${dialog}`;
+      const response = await authorizedFetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          numberId: id,
+          ...(dialog === "unassign" ? {} : { customerId: selectedCustomer }),
+        }),
+      });
+      if (!response.ok)
+        throw new Error(`Assignment could not be changed (${response.status})`);
+      setDialog(null);
+      setSelectedCustomer("");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["number", id] }),
+        queryClient.invalidateQueries({ queryKey: ["number-history", id] }),
+        queryClient.invalidateQueries({ queryKey: ["customer-numbers"] }),
+        queryClient.invalidateQueries({ queryKey: ["customer-history"] }),
+        queryClient.invalidateQueries({ queryKey: ["numbers"] }),
+      ]);
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Assignment could not be changed",
+      );
+    }
+  }
+
   return (
     <Stack spacing={2}>
       <Link to="/inventory">Back to inventory</Link>
@@ -69,10 +178,186 @@ export function NumberDetailPage() {
             <Paper key={index} sx={{ p: 2 }}>
               Customer {assignment.customerId} ·{" "}
               {assignment.active ? "Current" : "Past"}
+              {assignment.startedAt &&
+                ` · from ${new Date(assignment.startedAt).toLocaleString()}`}
+              {assignment.endedAt &&
+                ` to ${new Date(assignment.endedAt).toLocaleString()}`}
             </Paper>
           ))}
+          {active && (
+            <Typography>
+              Current customer: {activeName ?? active.customerId}
+            </Typography>
+          )}
+          {canAssign && (
+            <Stack direction="row" spacing={1}>
+              {!active && detail.data.status === "active" && (
+                <Button variant="contained" onClick={() => setDialog("assign")}>
+                  Assign number
+                </Button>
+              )}
+              {active && (
+                <>
+                  <Button onClick={() => setDialog("transfer")}>
+                    Transfer number
+                  </Button>
+                  <Button color="error" onClick={() => setDialog("unassign")}>
+                    Unassign number
+                  </Button>
+                </>
+              )}
+            </Stack>
+          )}
         </>
       )}
+      {canAudit && (
+        <>
+          <Typography variant="h6">Number history</Typography>
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+            <TextField
+              size="small"
+              label="Event type"
+              value={historyType}
+              onChange={(event) => {
+                setHistoryType(event.target.value);
+                setHistoryPage(1);
+              }}
+            />
+            <TextField
+              size="small"
+              type="date"
+              label="From"
+              slotProps={{ inputLabel: { shrink: true } }}
+              value={historyFrom}
+              onChange={(event) => {
+                setHistoryFrom(event.target.value);
+                setHistoryPage(1);
+              }}
+            />
+            <TextField
+              size="small"
+              type="date"
+              label="To"
+              slotProps={{ inputLabel: { shrink: true } }}
+              value={historyTo}
+              onChange={(event) => {
+                setHistoryTo(event.target.value);
+                setHistoryPage(1);
+              }}
+            />
+          </Stack>
+          {history.isError && (
+            <Alert severity="error">Unable to load number history.</Alert>
+          )}
+          {history.data?.items.map((event) => (
+            <Paper key={event.id} sx={{ p: 2 }}>
+              <Typography>{event.type}</Typography>
+              <Typography color="text.secondary">
+                {new Date(event.createdAt).toLocaleString()} · Actor{" "}
+                {event.actorId}
+              </Typography>
+              <Typography
+                component="pre"
+                sx={{ overflowX: "auto", whiteSpace: "pre-wrap" }}
+              >
+                {JSON.stringify({ previous: event.previous, next: event.next })}
+              </Typography>
+            </Paper>
+          ))}
+          {history.data && (
+            <Stack direction="row" spacing={1}>
+              <Button
+                disabled={historyPage === 1}
+                onClick={() => setHistoryPage(historyPage - 1)}
+              >
+                Previous history
+              </Button>
+              <Button
+                disabled={
+                  historyPage * history.data.pageSize >= history.data.total
+                }
+                onClick={() => setHistoryPage(historyPage + 1)}
+              >
+                Next history
+              </Button>
+            </Stack>
+          )}
+        </>
+      )}
+      <Dialog
+        open={dialog !== null}
+        onClose={() => setDialog(null)}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle>
+          {dialog === "assign"
+            ? "Assign number"
+            : dialog === "transfer"
+              ? "Transfer number"
+              : "Unassign number"}
+        </DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            {dialog !== "unassign" && (
+              <>
+                <TextField
+                  label="Find customer"
+                  value={customerSearch}
+                  onChange={(event) => setCustomerSearch(event.target.value)}
+                />
+                <FormControl fullWidth>
+                  <InputLabel htmlFor="assignment-customer">
+                    Customer
+                  </InputLabel>
+                  <Select
+                    native
+                    label="Customer"
+                    inputProps={{
+                      id: "assignment-customer",
+                      "aria-label": "Customer",
+                    }}
+                    value={selectedCustomer}
+                    onChange={(event) =>
+                      setSelectedCustomer(String(event.target.value))
+                    }
+                  >
+                    <option value="">Select a customer</option>
+                    {customers.data?.items
+                      .filter((customer) => customer.status === "active")
+                      .map((customer) => (
+                        <option key={customer.id} value={customer.id}>
+                          {customer.name}
+                        </option>
+                      ))}
+                  </Select>
+                </FormControl>
+              </>
+            )}
+            {dialog === "unassign" && (
+              <Typography>
+                Remove this number from its current customer?
+              </Typography>
+            )}
+            {error && <Alert severity="error">{error}</Alert>}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDialog(null)}>Cancel</Button>
+          <Button
+            variant="contained"
+            color={dialog === "unassign" ? "error" : "primary"}
+            disabled={dialog !== "unassign" && !selectedCustomer}
+            onClick={() => void submit()}
+          >
+            {dialog === "assign"
+              ? "Confirm assignment"
+              : dialog === "transfer"
+                ? "Confirm transfer"
+                : "Confirm unassignment"}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Stack>
   );
 }
