@@ -64,4 +64,4 @@
 - [x] Write browser tests for customer management, assignment, transfer/unassign, and history; confirm failure.
 - [x] Implement the pages and dialogs; run browser tests and full API suite.
 - [x] Run typecheck, lint, format, build, dependency audit, frozen install, Compose config, and diff checks.
-- [ ] Commit the requested phase message, record results, push the phase branch, fast-forward and verify `Prod`, then create Phase 8 from `Prod`.
+- [x] Commit the requested phase message, record results, push the phase branch, fast-forward and verify `Prod`, then create Phase 8 from `Prod`.
