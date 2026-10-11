@@ -8,6 +8,8 @@ Use `docker compose ps` to check service health. `GET http://localhost:8080/api/
 
 The local Compose stack uses development mode and creates an in-memory JWT signing key at each API start unless `JWT_SECRET` is supplied. Existing access tokens then expire on restart; refresh sessions can issue new access tokens. Set a stable secret of at least 32 bytes for any multi-instance or persistent deployment. Production mode refuses to start without it. Port requests and encrypted document upload also require `DATAPHONE_PORT_ENCRYPTION_KEY`, a stable base64-encoded 32-byte random key. Keep it in a secret manager, pass it to the API environment, and back it up separately; losing it makes stored port credentials and documents unreadable. The local web port stays bound to loopback. This stack is for local validation; a single-node replica set has no node failure tolerance.
 
+To exercise simulated purchases, disconnects, and ports, set `DATAPHONE_ENABLE_MOCK_CARRIER=true` before starting Compose or the native API, then configure a mock carrier account. The mock is never enabled in production mode and never calls a provider. Its inventory is read from local active numbers, so mock purchases and completed ports remain visible after an API restart.
+
 Before the first sign-in, export `DATAPHONE_BOOTSTRAP_EMAIL` and `DATAPHONE_BOOTSTRAP_PASSWORD` in your shell. The password must be at least 12 characters. Then run `docker compose exec -e DATAPHONE_BOOTSTRAP_EMAIL -e DATAPHONE_BOOTSTRAP_PASSWORD api node apps/api/dist/auth/bootstrap-cli.js`. The command creates the first Super Admin only when the user collection is empty. It never prints the password. Remove the variables from your shell after use. No default administrator account is created.
 
 ## Native development

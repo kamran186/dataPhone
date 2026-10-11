@@ -14,7 +14,7 @@ Bandwidth inventory uses `GET https://api.bandwidth.com/api/v2/accounts/{account
 
 ## Secrets and failure handling
 
-Carrier account records contain a `credentialRef`, not a password. For reference `BANDWIDTH_MAIN`, the API reads `DATAPHONE_CARRIER_BANDWIDTH_MAIN_USERNAME` and `DATAPHONE_CARRIER_BANDWIDTH_MAIN_PASSWORD` from its process environment. Supply these through a deployment secret manager; keep them out of Git, URL query strings, logs, and API responses. The registry service does not register a production mock.
+Carrier account records contain a `credentialRef`, not a password. For reference `BANDWIDTH_MAIN`, the API reads `DATAPHONE_CARRIER_BANDWIDTH_MAIN_USERNAME` and `DATAPHONE_CARRIER_BANDWIDTH_MAIN_PASSWORD` from its process environment. Supply these through a deployment secret manager; keep them out of Git, URL query strings, logs, and API responses. The runtime registers the local mock only when `DATAPHONE_ENABLE_MOCK_CARRIER=true` and `NODE_ENV` is not `production`; production never registers a mock.
 
 Outbound requests use HTTPS, reject redirects, time out after 10 seconds by default, and cap JSON responses at 1 MB. HTTP 401/403 map to authentication errors; 429 maps to a retryable rate-limit error carrying a bounded `Retry-After` delay; 408/504 map to timeouts; 5xx map to retryable upstream failures. Consumers should schedule a delayed job from `retryAfterMs` rather than immediately repeating a 429 request. No carrier-specific request quota is assumed without account documentation. Errors contain no response body or credential value.
 

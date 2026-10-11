@@ -1,0 +1,9 @@
+# Adding a carrier adapter
+
+1. Obtain the account-specific API or WSDL contract, sandbox credentials, required permissions, pagination, rate limits, error/status samples, order idempotency behavior, and billing or release consequences. Record which operations are documented and which have been tested with the actual account.
+2. Implement a `CarrierAdapter` under `apps/api/src/carriers`. Declare only the capabilities whose corresponding methods are implemented. The registry checks that the declared set and implementation match. Normalize numbers to E.164 and map upstream failures to the typed carrier error categories.
+3. Use the shared HTTPS transport or an equivalent bounded transport. Enforce timeouts, response size limits, safe redirect behavior, and credential redaction. Resolve credentials by `credentialRef` from the environment or secret manager, never from API responses or Git.
+4. Add contract tests with recorded, redacted sandbox examples. Test pagination, timeouts, 401/403, 429 retry delays, 5xx, duplicate orders, partial results, and resume after restart. Test DB transactions and reconciliation when an order confirms a number already held or assigned elsewhere.
+5. Register the adapter in `CarrierRegistryService` and update the capability matrix. Complete authorized sandbox acceptance before adding any real write capability to the runtime. The purchase, disconnect, and port services currently enforce a separate `mock`-only guard; removing that guard requires an explicit operational decision and account-level controls.
+
+`LocalMockAdapter` is an opt-in nonproduction implementation for demos and tests. It uses the DataPhone database for mock inventory, generates deterministic offers, confirms mock purchases and disconnects, and returns a confirmed FOC before tracking a mock port to completion. Its results are simulated and must never be reported as provider acceptance.

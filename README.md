@@ -1,6 +1,6 @@
 # DataPhone
 
-Internal DID inventory and inbound porting platform for DataPhone. This repository is being delivered in sequential phases; see [implementation progress](docs/implementation/PROGRESS.md) for verified status.
+Internal DID inventory and inbound porting proof of concept for DataPhone. All implementation phases are tracked in [implementation progress](docs/implementation/PROGRESS.md).
 
 ## Phase 0 feasibility probe
 
@@ -17,7 +17,7 @@ See [the architecture](docs/architecture/system.md) and [the feasibility report]
 
 ## Run the application
 
-The application has employee sign-in, permission-protected pages, background jobs, and a unified number inventory. Keep this local build on a private machine.
+The application has employee sign-in, permission-protected pages, background jobs, unified number inventory, mock purchasing and porting, dashboards, and reports. Keep this local build on a private machine.
 
 ```sh
 pnpm install
@@ -40,4 +40,8 @@ The [customer and assignment report](docs/implementation/phase-7-report.md) desc
 
 The [purchase and disconnect report](docs/implementation/phase-8-report.md) describes availability search, idempotent multi-number orders, confirmed assignment, tracked disconnects, and live progress. Billable actions remain disabled; mock carrier capabilities were verified in tests.
 
-Quality checks: `pnpm typecheck`, `pnpm lint`, `pnpm format:check`, `pnpm test`, and `pnpm build`.
+The [port report](docs/implementation/phase-9-report.md) covers encrypted drafts and documents, mock order tracking, FOC, completion, and audit history. The [dashboard and reporting report](docs/implementation/phase-10-report.md) covers metrics and CSV/Excel exports. To exercise mock operations locally, set `DATAPHONE_ENABLE_MOCK_CARRIER=true` and configure a mock carrier account; production mode never enables the mock. Supply `DATAPHONE_PORT_ENCRYPTION_KEY` before creating a port draft.
+
+For deployment and daily use, see the [production guide](docs/deployment/production.md), [backup and restore](docs/deployment/backup-restore.md), [operator guide](docs/operators/guide.md), [API guide](docs/api.md), and [carrier extension guide](docs/carriers/adding-adapter.md).
+
+Quality checks: `pnpm typecheck`, `pnpm lint`, `pnpm format:check`, `pnpm test`, `pnpm --filter @dataphone/web test:e2e`, and `pnpm build`.
