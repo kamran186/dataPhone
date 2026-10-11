@@ -63,4 +63,4 @@
 
 - [x] Write and run failing browser tests for search/comparison, purchase request/status, and disconnect confirmation.
 - [x] Implement browser flows; run full API/browser suites, static gates, frozen install, audit, and Compose checks.
-- [ ] Commit requested phase message, record results, push phase branch, fast-forward and verify `Prod`, then create Phase 9 from `Prod`.
+- [x] Commit requested phase message, record results, push phase branch, fast-forward and verify `Prod`, then create Phase 9 from `Prod`.
