@@ -22,6 +22,7 @@ const appendOnlyCollections = new Set([
   "number_events",
   "job_events",
   "security_audit_events",
+  "port_events",
 ]);
 
 export class DatabaseInfrastructure {

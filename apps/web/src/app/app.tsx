@@ -13,6 +13,8 @@ import { JobsPage } from "../pages/jobs-page";
 import { LoginPage } from "../pages/login-page";
 import { OverviewPage } from "../pages/overview-page";
 import { UsersPage } from "../pages/users-page";
+import { PortsPage } from "../pages/ports-page";
+import { PortDetailPage } from "../pages/port-detail-page";
 import { useAuthStore } from "./model/use-auth-store";
 
 function SessionInitializer() {
@@ -67,6 +69,22 @@ export function App() {
                   element={
                     <RequirePermission permission="numbers.purchase">
                       <PurchasesPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="ports"
+                  element={
+                    <RequirePermission permission="ports.manage">
+                      <PortsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="ports/:id"
+                  element={
+                    <RequirePermission permission="ports.manage">
+                      <PortDetailPage />
                     </RequirePermission>
                   }
                 />

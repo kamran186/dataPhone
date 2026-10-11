@@ -36,6 +36,11 @@ import {
   PurchasesController,
 } from "./purchases/purchases.controller";
 import { PurchasesService } from "./purchases/purchases.service";
+import { PortDocuments } from "./ports/port.documents";
+import { PortOperations } from "./ports/port.operations";
+import { PortJobs } from "./ports/port.jobs";
+import { PortRequests } from "./ports/port.requests";
+import { PortsController } from "./ports/ports.controller";
 import { SystemController } from "./system/system.controller";
 
 @Module({
@@ -57,6 +62,10 @@ import { SystemController } from "./system/system.controller";
     PurchaseOrdersService,
     DisconnectService,
     PurchaseJobs,
+    PortDocuments,
+    PortOperations,
+    PortJobs,
+    PortRequests,
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
   ],
@@ -76,6 +85,7 @@ import { SystemController } from "./system/system.controller";
     PurchasesController,
     NumberDisconnectController,
     DisconnectsController,
+    PortsController,
   ],
 })
 export class AppModule {}

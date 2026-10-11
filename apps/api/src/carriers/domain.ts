@@ -76,6 +76,9 @@ export interface CarrierOrder {
   nativeOrderId: string;
   status: "pending" | "complete" | "failed";
   numbers: string[];
+  nativeStatus?: string;
+  focDate?: string;
+  rejectionReason?: string;
 }
 
 export interface NumberPurchaseCapability {

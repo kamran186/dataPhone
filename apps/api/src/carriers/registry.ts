@@ -15,6 +15,8 @@ import type {
   NumberPurchaseCapability,
   OrderStatusCapability,
   NumberDisconnectCapability,
+  NumberPortabilityCapability,
+  PortSubmissionCapability,
 } from "./domain";
 import { CarrierError, unsupportedCapability } from "./errors";
 import { FetchCarrierTransport } from "./transport";
@@ -99,6 +101,20 @@ export class CarrierRegistry {
     if (!adapter.disconnect)
       throw unsupportedCapability(account.carrier, "number.disconnect");
     return adapter.disconnect;
+  }
+
+  portability(account: CarrierAccount): NumberPortabilityCapability {
+    const adapter = this.resolve(account, "number.portability");
+    if (!adapter.portability)
+      throw unsupportedCapability(account.carrier, "number.portability");
+    return adapter.portability;
+  }
+
+  portSubmission(account: CarrierAccount): PortSubmissionCapability {
+    const adapter = this.resolve(account, "port.submit");
+    if (!adapter.portSubmission)
+      throw unsupportedCapability(account.carrier, "port.submit");
+    return adapter.portSubmission;
   }
 
   capabilities(code: CarrierCode): CarrierCapability[] {

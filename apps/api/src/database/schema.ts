@@ -16,6 +16,8 @@ const coreCollections = [
   "disconnect_requests",
   "port_requests",
   "port_request_numbers",
+  "port_documents",
+  "port_events",
   "background_jobs",
   "job_events",
   "carrier_sync_runs",
@@ -141,6 +143,26 @@ const indexes: Record<string, IndexDescription[]> = {
       name: "uq_port_request_numbers_identity",
       key: { portRequestId: 1, e164: 1 },
       unique: true,
+    },
+    {
+      name: "uq_open_port_number",
+      key: { e164: 1 },
+      unique: true,
+      partialFilterExpression: {
+        status: { $in: ["DRAFT", "SUBMITTED", "DATE_CONFIRMED", "REJECTED"] },
+      },
+    },
+  ],
+  port_documents: [
+    {
+      name: "ix_port_documents_request",
+      key: { portRequestId: 1, createdAt: -1 },
+    },
+  ],
+  port_events: [
+    {
+      name: "ix_port_events_request",
+      key: { portRequestId: 1, createdAt: -1 },
     },
   ],
   background_jobs: [

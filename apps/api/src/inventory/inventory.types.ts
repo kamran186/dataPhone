@@ -66,7 +66,8 @@ export interface ReconciliationIssueRecord {
     | "duplicate_carrier"
     | "missing_at_carrier"
     | "unexpected_reappearance"
-    | "purchase_conflict";
+    | "purchase_conflict"
+    | "port_conflict";
   status: "open" | "resolved";
   detectedAt: Date;
   resolvedAt?: Date;

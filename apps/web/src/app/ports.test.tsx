@@ -1,0 +1,154 @@
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { App } from "./app";
+import { useAuthStore } from "./model/use-auth-store";
+
+const user = {
+  id: "507f1f77bcf86cd799439011",
+  email: "operator@example.test",
+  roleKeys: ["SUPER_ADMIN"],
+  permissions: ["ports.manage", "customers.view"],
+};
+const portId = "507f1f77bcf86cd799439099";
+const accountId = "507f1f77bcf86cd799439021";
+const customerId = "507f1f77bcf86cd799439012";
+
+beforeEach(() => {
+  useAuthStore.setState({
+    status: "authenticated",
+    accessToken: "port-token",
+    user,
+  });
+  window.history.replaceState({}, "", "/ports");
+});
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+it("creates a redacted port draft through the browser wizard", async () => {
+  const request = vi.fn(
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path.endsWith("/ports") && init?.method === "POST")
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({
+            id: portId,
+            status: "DRAFT",
+            numbers: ["+18043024183"],
+          }),
+        };
+      if (path.endsWith("/ports"))
+        return { ok: true, json: async () => ({ items: [], total: 0 }) };
+      if (path.includes("/customers?"))
+        return {
+          ok: true,
+          json: async () => ({
+            items: [{ id: customerId, name: "Acme West", status: "active" }],
+          }),
+        };
+      if (path.endsWith("/carriers"))
+        return {
+          ok: true,
+          json: async () => [
+            {
+              code: "mock",
+              displayName: "Mock",
+              accounts: [
+                {
+                  id: accountId,
+                  externalAccountId: "sandbox",
+                  status: "active",
+                },
+              ],
+            },
+          ],
+        };
+      return { ok: true, json: async () => ({ name: "DataPhone" }) };
+    },
+  );
+  vi.stubGlobal("fetch", request);
+  render(<App />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "New port request" }),
+  );
+  await screen.findByRole("option", { name: "Acme West" });
+  await screen.findByRole("option", { name: "Mock · sandbox" });
+  fireEvent.change(screen.getByRole("combobox", { name: "Customer" }), {
+    target: { value: customerId },
+  });
+  fireEvent.change(
+    screen.getByRole("combobox", { name: "Destination carrier account" }),
+    { target: { value: accountId } },
+  );
+  for (const [name, value] of [
+    ["Numbers to port", "+18043024183"],
+    ["Current provider", "Old Carrier"],
+    ["Account name", "Acme West"],
+    ["Account number", "sensitive-123"],
+    ["Account PIN", "7788"],
+    ["Address line 1", "1 Main St"],
+    ["City", "Richmond"],
+    ["State", "VA"],
+    ["Postal code", "23220"],
+  ])
+    fireEvent.change(screen.getByLabelText(name), { target: { value } });
+  fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+  await waitFor(() =>
+    expect(request).toHaveBeenCalledWith(
+      "/api/v1/ports",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.stringContaining('"accountNumber":"sensitive-123"'),
+      }),
+    ),
+  );
+  expect(await screen.findByText(/Draft created/)).toBeInTheDocument();
+  expect(screen.queryByText("sensitive-123")).not.toBeInTheDocument();
+});
+
+it("shows a confirmed FOC date without claiming the port is complete", async () => {
+  window.history.replaceState({}, "", `/ports/${portId}`);
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      const data = path.endsWith(`/ports/${portId}`)
+        ? {
+            id: portId,
+            status: "DATE_CONFIRMED",
+            numbers: ["+18043024183"],
+            focDate: "2026-11-12T00:00:00.000Z",
+            currentProvider: "Old Carrier",
+            accountName: "Acme West",
+            history: [
+              {
+                id: "event-1",
+                type: "port.date_confirmed",
+                createdAt: "2026-10-11T00:00:00Z",
+              },
+            ],
+          }
+        : path.endsWith(`/ports/${portId}/documents`)
+          ? []
+          : { name: "DataPhone" };
+      return { ok: true, json: async () => data };
+    }),
+  );
+  render(<App />);
+  expect(
+    await screen.findByRole("heading", { name: "Port request" }),
+  ).toBeInTheDocument();
+  expect(
+    await screen.findByText(/Port is still in progress/),
+  ).toBeInTheDocument();
+  expect(screen.getAllByText(/Date confirmed/).length).toBeGreaterThan(0);
+});
