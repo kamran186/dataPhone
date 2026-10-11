@@ -21,4 +21,8 @@
 3. Phase 2 must enforce the TypeORM/native transaction boundary described in the database design.
 4. Docker deployment and restart recovery remain for later phases and require a running daemon.
 
+## Git delivery
+
+Phase implementation commit: `f852f1a6d57e6b3abc41f5db33a72d01d9a18806`. The `phase-0-architecture` branch and `Prod` were both pushed and verified at that commit before this progress update.
+
 References: [TypeORM MongoDB support](https://v0.typeorm.io/docs/drivers/mongodb/), [MongoDB transactions](https://www.mongodb.com/docs/drivers/node/current/crud/transactions/), [MongoDB change streams](https://www.mongodb.com/docs/manual/changestreams/), and [MongoDB GridFS](https://www.mongodb.com/docs/drivers/node/current/crud/gridfs/).
