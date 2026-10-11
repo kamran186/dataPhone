@@ -5,6 +5,8 @@
   "type": "commonjs",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "db:init": "node dist/database/cli.js init",
+    "db:seed": "node dist/database/cli.js seed",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "NODE_OPTIONS=--experimental-vm-modules jest --runInBand",
     "start": "node dist/main.js"

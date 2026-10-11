@@ -4,6 +4,7 @@ import request from "supertest";
 import { createApp } from "../src/bootstrap";
 import { loadConfig } from "../src/config/app-config";
 import { DatabaseHealthService } from "../src/database/database-health.service";
+import { DatabaseService } from "../src/database/database.service";
 
 describe("configuration", () => {
   it("requires a named MongoDB database", () => {
@@ -55,6 +56,15 @@ describe("HTTP foundation", () => {
   it("reports database readiness when an isolated replica set is available", async () => {
     if (!process.env.DATAPHONE_TEST_MONGO_URL) return;
     await request(app.getHttpServer()).get("/api/v1/health/ready").expect(200);
+    const database = app.get(DatabaseService);
+    expect(
+      await database
+        .nativeDb()
+        .collection("schema_migrations")
+        .countDocuments({
+          _id: "core-v1" as never,
+        }),
+    ).toBe(1);
   });
 
   it("reports unavailable when the database ping fails", async () => {

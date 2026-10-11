@@ -11,3 +11,5 @@ The current Phase 1 build has no staff authentication, carrier accounts, or prod
 ## Native development
 
 Use Node.js 24 and pnpm 12.4.2. Set `MONGO_URI` to a MongoDB URL with an explicit database name; an empty path is rejected. Set `CORS_ORIGIN` to the frontend origin and optionally `PORT` (default 3000). Copy `.env.example` for reference, but do not commit a real `.env` file. Build the shared package before starting API or web; `pnpm build` builds all workspaces in dependency order.
+
+After `pnpm build`, run `pnpm --filter @dataphone/api db:init` to apply the versioned core collections and indexes to the database named in `MONGO_URI`. Run `pnpm --filter @dataphone/api db:seed` to create the four initial role names. Both commands can be repeated safely. The API readiness endpoint also applies the core schema when it first connects. Role permissions and administrator bootstrap arrive in Phase 3.
