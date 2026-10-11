@@ -15,6 +15,7 @@ import { OverviewPage } from "../pages/overview-page";
 import { UsersPage } from "../pages/users-page";
 import { PortsPage } from "../pages/ports-page";
 import { PortDetailPage } from "../pages/port-detail-page";
+import { ReportsPage } from "../pages/reports-page";
 import { useAuthStore } from "./model/use-auth-store";
 
 function SessionInitializer() {
@@ -109,6 +110,22 @@ export function App() {
                   element={
                     <RequirePermission permission="jobs.view">
                       <JobsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="reports"
+                  element={
+                    <RequirePermission permission="reports.view">
+                      <ReportsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="reports/:type"
+                  element={
+                    <RequirePermission permission="reports.view">
+                      <ReportsPage />
                     </RequirePermission>
                   }
                 />

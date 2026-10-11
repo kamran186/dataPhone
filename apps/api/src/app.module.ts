@@ -42,6 +42,8 @@ import { PortJobs } from "./ports/port.jobs";
 import { PortRequests } from "./ports/port.requests";
 import { PortsController } from "./ports/ports.controller";
 import { SystemController } from "./system/system.controller";
+import { ReportingController } from "./reporting/reporting.controller";
+import { ReportingService } from "./reporting/reporting.service";
 
 @Module({
   providers: [
@@ -66,6 +68,7 @@ import { SystemController } from "./system/system.controller";
     PortOperations,
     PortJobs,
     PortRequests,
+    ReportingService,
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
   ],
@@ -86,6 +89,7 @@ import { SystemController } from "./system/system.controller";
     NumberDisconnectController,
     DisconnectsController,
     PortsController,
+    ReportingController,
   ],
 })
 export class AppModule {}
