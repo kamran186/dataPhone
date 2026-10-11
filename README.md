@@ -38,4 +38,6 @@ The [inventory report](docs/implementation/phase-6-report.md) describes carrier 
 
 The [customer and assignment report](docs/implementation/phase-7-report.md) describes customer records, number ownership, transfer history, and audited changes. Authorized staff can assign from a number detail page or select inventory rows for a bulk assignment.
 
+The [purchase and disconnect report](docs/implementation/phase-8-report.md) describes availability search, idempotent multi-number orders, confirmed assignment, tracked disconnects, and live progress. Billable actions remain disabled; mock carrier capabilities were verified in tests.
+
 Quality checks: `pnpm typecheck`, `pnpm lint`, `pnpm format:check`, `pnpm test`, and `pnpm build`.

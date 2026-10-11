@@ -11,6 +11,10 @@ import type {
   CarrierCapability,
   CarrierCode,
   InventoryCapability,
+  NumberSearchCapability,
+  NumberPurchaseCapability,
+  OrderStatusCapability,
+  NumberDisconnectCapability,
 } from "./domain";
 import { CarrierError, unsupportedCapability } from "./errors";
 import { FetchCarrierTransport } from "./transport";
@@ -67,6 +71,34 @@ export class CarrierRegistry {
     if (!adapter.inventory)
       throw unsupportedCapability(account.carrier, "inventory.list");
     return adapter.inventory;
+  }
+
+  search(account: CarrierAccount): NumberSearchCapability {
+    const adapter = this.resolve(account, "number.search");
+    if (!adapter.numberSearch)
+      throw unsupportedCapability(account.carrier, "number.search");
+    return adapter.numberSearch;
+  }
+
+  purchase(account: CarrierAccount): NumberPurchaseCapability {
+    const adapter = this.resolve(account, "number.purchase");
+    if (!adapter.purchase)
+      throw unsupportedCapability(account.carrier, "number.purchase");
+    return adapter.purchase;
+  }
+
+  orderStatus(account: CarrierAccount): OrderStatusCapability {
+    const adapter = this.resolve(account, "order.status");
+    if (!adapter.orderStatus)
+      throw unsupportedCapability(account.carrier, "order.status");
+    return adapter.orderStatus;
+  }
+
+  disconnect(account: CarrierAccount): NumberDisconnectCapability {
+    const adapter = this.resolve(account, "number.disconnect");
+    if (!adapter.disconnect)
+      throw unsupportedCapability(account.carrier, "number.disconnect");
+    return adapter.disconnect;
   }
 
   capabilities(code: CarrierCode): CarrierCapability[] {

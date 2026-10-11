@@ -131,7 +131,7 @@ export class InventoryService {
     search?: string;
     customer?: string;
     carrier?: CarrierCode;
-    status?: "active" | "missing";
+    status?: "active" | "missing" | "disconnected";
     page?: number;
     pageSize?: number;
     sort?: "e164" | "updatedAt" | "status";
@@ -513,6 +513,15 @@ export class InventoryService {
         account._id,
         number.e164,
         "duplicate_carrier",
+        existing._id,
+      );
+      return "issues";
+    }
+    if (existing?.status === "disconnected") {
+      await this.recordIssue(
+        account._id,
+        number.e164,
+        "unexpected_reappearance",
         existing._id,
       );
       return "issues";

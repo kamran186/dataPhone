@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { ConflictException, Injectable } from "@nestjs/common";
 import { MongoServerError, ObjectId } from "mongodb";
+import type { ClientSession, Db } from "mongodb";
 import { DatabaseService } from "../database/database.service";
 import type {
   BackgroundJob,
@@ -49,7 +50,7 @@ export class JobStore {
     return this.database.nativeDb().collection<JobEvent>("job_events");
   }
 
-  async create(input: CreateJobInput): Promise<BackgroundJob> {
+  private prepare(input: CreateJobInput): BackgroundJob {
     if (!/^[a-z][a-z0-9_.-]{1,63}$/.test(input.type))
       throw new Error("Invalid job type");
     if (
@@ -60,9 +61,8 @@ export class JobStore {
     const maxAttempts = input.maxAttempts ?? 3;
     if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 10)
       throw new Error("Invalid maximum attempts");
-    await this.database.ensureReady();
     const now = new Date();
-    const job: BackgroundJob = {
+    return {
       _id: new ObjectId(),
       type: input.type,
       payload: input.payload,
@@ -77,21 +77,44 @@ export class JobStore {
       createdAt: now,
       updatedAt: now,
     };
+  }
+
+  private async insertInTransaction(
+    db: Db,
+    session: ClientSession,
+    job: BackgroundJob,
+  ): Promise<void> {
+    await db
+      .collection<BackgroundJob>("background_jobs")
+      .insertOne(job, { session });
+    await db.collection<JobEvent>("job_events").insertOne(
+      {
+        _id: new ObjectId(),
+        jobId: job._id,
+        sequence: 1,
+        type: "queued",
+        createdAt: job.createdAt,
+      },
+      { session },
+    );
+  }
+
+  async createInTransaction(
+    db: Db,
+    session: ClientSession,
+    input: CreateJobInput,
+  ): Promise<BackgroundJob> {
+    const job = this.prepare(input);
+    await this.insertInTransaction(db, session, job);
+    return job;
+  }
+
+  async create(input: CreateJobInput): Promise<BackgroundJob> {
+    await this.database.ensureReady();
+    const job = this.prepare(input);
     try {
       await this.database.withTransaction(async (db, session) => {
-        await db
-          .collection<BackgroundJob>("background_jobs")
-          .insertOne(job, { session });
-        await db.collection<JobEvent>("job_events").insertOne(
-          {
-            _id: new ObjectId(),
-            jobId: job._id,
-            sequence: 1,
-            type: "queued",
-            createdAt: now,
-          },
-          { session },
-        );
+        await this.insertInTransaction(db, session, job);
       });
       return job;
     } catch (error) {

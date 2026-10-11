@@ -250,6 +250,7 @@ export function InventoryPage() {
             <MenuItem value="">All statuses</MenuItem>
             <MenuItem value="active">Active</MenuItem>
             <MenuItem value="missing">Missing</MenuItem>
+            <MenuItem value="disconnected">Disconnected</MenuItem>
           </Select>
           <Select
             value={sort}

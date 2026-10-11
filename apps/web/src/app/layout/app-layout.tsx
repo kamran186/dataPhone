@@ -21,6 +21,7 @@ const drawerWidth = 232;
 const links = [
   { to: "/", label: "Overview", permission: null },
   { to: "/inventory", label: "Inventory", permission: "inventory.view" },
+  { to: "/purchases", label: "Purchases", permission: "numbers.purchase" },
   { to: "/customers", label: "Customers", permission: "customers.view" },
   { to: "/jobs", label: "Jobs", permission: "jobs.view" },
   { to: "/users", label: "Users", permission: "users.manage" },

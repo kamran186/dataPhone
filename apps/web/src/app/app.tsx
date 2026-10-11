@@ -8,6 +8,7 @@ import { CustomersPage } from "../pages/customers-page";
 import { CustomerDetailPage } from "../pages/customer-detail-page";
 import { InventoryPage } from "../pages/inventory-page";
 import { NumberDetailPage } from "../pages/number-detail-page";
+import { PurchasesPage } from "../pages/purchases-page";
 import { JobsPage } from "../pages/jobs-page";
 import { LoginPage } from "../pages/login-page";
 import { OverviewPage } from "../pages/overview-page";
@@ -58,6 +59,14 @@ export function App() {
                   element={
                     <RequirePermission permission="inventory.view">
                       <NumberDetailPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="purchases"
+                  element={
+                    <RequirePermission permission="numbers.purchase">
+                      <PurchasesPage />
                     </RequirePermission>
                   }
                 />

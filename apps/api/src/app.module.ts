@@ -27,6 +27,15 @@ import { AssignmentsService } from "./ownership/assignments.service";
 import { CustomersController } from "./ownership/customers.controller";
 import { CustomersService } from "./ownership/customers.service";
 import { HistoryController } from "./ownership/history.controller";
+import { DisconnectService } from "./purchases/disconnect.service";
+import { PurchaseJobs } from "./purchases/purchase.jobs";
+import { PurchaseOrdersService } from "./purchases/purchase-orders.service";
+import {
+  DisconnectsController,
+  NumberDisconnectController,
+  PurchasesController,
+} from "./purchases/purchases.controller";
+import { PurchasesService } from "./purchases/purchases.service";
 import { SystemController } from "./system/system.controller";
 
 @Module({
@@ -44,6 +53,10 @@ import { SystemController } from "./system/system.controller";
     AuditService,
     CustomersService,
     AssignmentsService,
+    PurchasesService,
+    PurchaseOrdersService,
+    DisconnectService,
+    PurchaseJobs,
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
   ],
@@ -60,6 +73,9 @@ import { SystemController } from "./system/system.controller";
     CustomersController,
     AssignmentsController,
     HistoryController,
+    PurchasesController,
+    NumberDisconnectController,
+    DisconnectsController,
   ],
 })
 export class AppModule {}

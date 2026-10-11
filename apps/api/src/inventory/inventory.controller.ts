@@ -29,7 +29,7 @@ function query(raw: Record<string, string | undefined>) {
   if (carrier && !CARRIER_CODES.includes(carrier as CarrierCode))
     throw new BadRequestException("Invalid carrier filter");
   const status = raw.status;
-  if (status && !["active", "missing"].includes(status))
+  if (status && !["active", "missing", "disconnected"].includes(status))
     throw new BadRequestException("Invalid status filter");
   const sort = raw.sort;
   if (sort && !["e164", "updatedAt", "status"].includes(sort))
@@ -41,7 +41,7 @@ function query(raw: Record<string, string | undefined>) {
     search: raw.search,
     customer: raw.customer,
     carrier: carrier as CarrierCode | undefined,
-    status: status as "active" | "missing" | undefined,
+    status: status as "active" | "missing" | "disconnected" | undefined,
     page,
     pageSize,
     sort: sort as "e164" | "updatedAt" | "status" | undefined,

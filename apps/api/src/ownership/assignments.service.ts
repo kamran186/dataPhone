@@ -131,36 +131,44 @@ export class AssignmentsService {
   async unassign(numberId: ObjectId, actorId: ObjectId) {
     await this.database.ensureReady();
     return this.conflicts(async () =>
-      this.database.withTransaction(async (db, session) => {
-        const assignments =
-          db.collection<AssignmentRecord>("number_assignments");
-        const current = await assignments.findOne(
-          { phoneNumberId: numberId, active: true },
-          { session },
-        );
-        if (!current) throw new ConflictException("Number is not assigned");
-        const now = new Date();
-        const closed = await assignments.updateOne(
-          { _id: current._id, active: true },
-          { $set: { active: false, endedAt: now } },
-          { session },
-        );
-        if (!closed.matchedCount)
-          throw new ConflictException("Number assignment changed");
-        await this.audit.append(db, session, {
-          type: "number.unassigned",
-          actorId,
-          phoneNumberId: numberId,
-          customerId: current.customerId,
-          previous: { customerId: current.customerId.toHexString() },
-          next: null,
-        });
-        return { ...view(current), active: false, endedAt: now };
-      }),
+      this.database.withTransaction((db, session) =>
+        this.unassignInTransaction(db, session, numberId, actorId),
+      ),
     );
   }
 
-  private async assignInTransaction(
+  async unassignInTransaction(
+    db: Db,
+    session: ClientSession,
+    numberId: ObjectId,
+    actorId: ObjectId,
+  ) {
+    const assignments = db.collection<AssignmentRecord>("number_assignments");
+    const current = await assignments.findOne(
+      { phoneNumberId: numberId, active: true },
+      { session },
+    );
+    if (!current) throw new ConflictException("Number is not assigned");
+    const now = new Date();
+    const closed = await assignments.updateOne(
+      { _id: current._id, active: true },
+      { $set: { active: false, endedAt: now } },
+      { session },
+    );
+    if (!closed.matchedCount)
+      throw new ConflictException("Number assignment changed");
+    await this.audit.append(db, session, {
+      type: "number.unassigned",
+      actorId,
+      phoneNumberId: numberId,
+      customerId: current.customerId,
+      previous: { customerId: current.customerId.toHexString() },
+      next: null,
+    });
+    return { ...view(current), active: false, endedAt: now };
+  }
+
+  async assignInTransaction(
     db: Db,
     session: ClientSession,
     numberId: ObjectId,

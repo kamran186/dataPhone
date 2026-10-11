@@ -54,12 +54,21 @@ export interface AvailableNumber {
   nativeId: string;
   locality?: string;
   region?: string;
+  monthlyPriceCents?: number;
+  setupPriceCents?: number;
+  currency?: string;
 }
 
 export interface NumberSearchCapability {
   searchNumbers(
     account: CarrierAccount,
-    request: { areaCode?: string; region?: string; quantity: number },
+    request: {
+      areaCode?: string;
+      city?: string;
+      region?: string;
+      pattern?: string;
+      quantity: number;
+    },
   ): Promise<AvailableNumber[]>;
 }
 

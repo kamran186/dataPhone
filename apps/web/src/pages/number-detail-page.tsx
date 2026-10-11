@@ -15,9 +15,10 @@ import {
   Typography,
 } from "@mui/material";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAuthStore } from "../app/model/use-auth-store";
+import { subscribeJobEvents } from "../entities/jobs/api/job-stream";
 import { authorizedFetch, getJson } from "../shared/api/client";
 
 interface NumberDetail {
@@ -54,6 +55,9 @@ export function NumberDetailPage() {
   const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
   const canAssign = Boolean(user?.permissions.includes("numbers.assign"));
+  const canDisconnect = Boolean(
+    user?.permissions.includes("numbers.disconnect"),
+  );
   const canAudit = Boolean(user?.permissions.includes("audit.view"));
   const [dialog, setDialog] = useState<
     "assign" | "transfer" | "unassign" | null
@@ -65,6 +69,13 @@ export function NumberDetailPage() {
   const [historyFrom, setHistoryFrom] = useState("");
   const [historyTo, setHistoryTo] = useState("");
   const [historyPage, setHistoryPage] = useState(1);
+  const [disconnectOpen, setDisconnectOpen] = useState(false);
+  const [disconnectConfirmation, setDisconnectConfirmation] = useState("");
+  const [disconnectError, setDisconnectError] = useState("");
+  const [disconnectNotice, setDisconnectNotice] = useState("");
+  const [disconnectId, setDisconnectId] = useState("");
+  const [disconnectJobId, setDisconnectJobId] = useState("");
+  const [disconnectProgress, setDisconnectProgress] = useState("");
   const customerParams = new URLSearchParams({ page: "1", pageSize: "100" });
   if (customerSearch.length >= 2) customerParams.set("search", customerSearch);
   const historyParams = new URLSearchParams({
@@ -93,6 +104,38 @@ export function NumberDetailPage() {
         `/api/v1/numbers/${id}/history?${historyParams}`,
       ),
   });
+  const disconnect = useQuery({
+    queryKey: ["disconnect", disconnectId],
+    enabled: Boolean(disconnectId),
+    queryFn: () =>
+      getJson<{ status: string; errorCode?: string }>(
+        `/api/v1/disconnects/${disconnectId}`,
+      ),
+  });
+  useEffect(() => {
+    if (!disconnectJobId) return;
+    const controller = new AbortController();
+    void subscribeJobEvents(
+      disconnectJobId,
+      (event) => {
+        setDisconnectProgress(
+          `${event.type}${event.progress === undefined ? "" : ` · ${event.progress}%`}`,
+        );
+        if (event.type === "succeeded" || event.type === "failed") {
+          void queryClient.invalidateQueries({
+            queryKey: ["disconnect", disconnectId],
+          });
+          void queryClient.invalidateQueries({ queryKey: ["number", id] });
+          void queryClient.invalidateQueries({
+            queryKey: ["number-history", id],
+          });
+          void queryClient.invalidateQueries({ queryKey: ["numbers"] });
+        }
+      },
+      controller.signal,
+    );
+    return () => controller.abort();
+  }, [disconnectId, disconnectJobId, id, queryClient]);
   const active = detail.data?.assignments.find(
     (assignment) => assignment.active,
   );
@@ -136,12 +179,59 @@ export function NumberDetailPage() {
     }
   }
 
+  async function submitDisconnect() {
+    if (!id || !detail.data || disconnectConfirmation !== detail.data.e164)
+      return;
+    setDisconnectError("");
+    try {
+      const response = await authorizedFetch(
+        `/api/v1/numbers/${id}/disconnect`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            confirmE164: disconnectConfirmation,
+            idempotencyKey: crypto.randomUUID(),
+          }),
+        },
+      );
+      if (!response.ok)
+        throw new Error(
+          `Disconnect could not be requested (${response.status})`,
+        );
+      const request = (await response.json()) as { id: string; jobId: string };
+      setDisconnectId(request.id);
+      setDisconnectJobId(request.jobId);
+      setDisconnectNotice(`Disconnect queued: ${request.id}`);
+      setDisconnectOpen(false);
+      setDisconnectConfirmation("");
+    } catch (cause) {
+      setDisconnectError(
+        cause instanceof Error
+          ? cause.message
+          : "Disconnect could not be requested",
+      );
+    }
+  }
+
   return (
     <Stack spacing={2}>
       <Link to="/inventory">Back to inventory</Link>
       {detail.isPending && <CircularProgress aria-label="Loading number" />}
       {detail.isError && (
         <Alert severity="error">Unable to load this number.</Alert>
+      )}
+      {disconnectNotice && <Alert severity="success">{disconnectNotice}</Alert>}
+      {disconnectProgress && (
+        <Alert severity="info">Disconnect progress: {disconnectProgress}</Alert>
+      )}
+      {disconnect.data && (
+        <Alert
+          severity={disconnect.data.status === "failed" ? "error" : "info"}
+        >
+          Disconnect status: {disconnect.data.status}
+          {disconnect.data.errorCode ? ` · ${disconnect.data.errorCode}` : ""}
+        </Alert>
       )}
       {detail.data && (
         <>
@@ -205,6 +295,23 @@ export function NumberDetailPage() {
                     Unassign number
                   </Button>
                 </>
+              )}
+            </Stack>
+          )}
+          {canDisconnect && detail.data.status === "active" && (
+            <Stack spacing={1}>
+              <Button
+                color="error"
+                variant="outlined"
+                disabled={detail.data.carrier !== "mock"}
+                onClick={() => setDisconnectOpen(true)}
+              >
+                Disconnect number
+              </Button>
+              {detail.data.carrier !== "mock" && (
+                <Typography color="text.secondary">
+                  Live carrier disconnects are disabled.
+                </Typography>
               )}
             </Stack>
           )}
@@ -355,6 +462,42 @@ export function NumberDetailPage() {
               : dialog === "transfer"
                 ? "Confirm transfer"
                 : "Confirm unassignment"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+      <Dialog
+        open={disconnectOpen}
+        onClose={() => setDisconnectOpen(false)}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle>Disconnect number</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <Typography>
+              Type {detail.data?.e164} to confirm this disconnect.
+            </Typography>
+            <TextField
+              label="Type number to confirm"
+              value={disconnectConfirmation}
+              onChange={(event) =>
+                setDisconnectConfirmation(event.target.value)
+              }
+            />
+            {disconnectError && (
+              <Alert severity="error">{disconnectError}</Alert>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDisconnectOpen(false)}>Cancel</Button>
+          <Button
+            color="error"
+            variant="contained"
+            disabled={disconnectConfirmation !== detail.data?.e164}
+            onClick={() => void submitDisconnect()}
+          >
+            Confirm disconnect
           </Button>
         </DialogActions>
       </Dialog>

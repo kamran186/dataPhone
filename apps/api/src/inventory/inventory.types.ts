@@ -26,7 +26,7 @@ export interface PhoneNumberRecord {
   carrierId: ObjectId;
   carrierAccountId: ObjectId;
   carrierNumberId: string;
-  status: "active" | "missing";
+  status: "active" | "missing" | "disconnected";
   firstSeenAt: Date;
   lastSeenAt: Date;
   createdAt: Date;
@@ -62,7 +62,11 @@ export interface ReconciliationIssueRecord {
   carrierAccountId: ObjectId;
   phoneNumberId?: ObjectId;
   e164: string;
-  type: "duplicate_carrier" | "missing_at_carrier";
+  type:
+    | "duplicate_carrier"
+    | "missing_at_carrier"
+    | "unexpected_reappearance"
+    | "purchase_conflict";
   status: "open" | "resolved";
   detectedAt: Date;
   resolvedAt?: Date;

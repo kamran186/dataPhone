@@ -13,6 +13,7 @@ const coreCollections = [
   "number_assignments",
   "number_events",
   "purchase_orders",
+  "disconnect_requests",
   "port_requests",
   "port_request_numbers",
   "background_jobs",
@@ -106,6 +107,25 @@ const indexes: Record<string, IndexDescription[]> = {
       unique: true,
     },
     { name: "ix_purchase_orders_status", key: { status: 1, createdAt: -1 } },
+  ],
+  disconnect_requests: [
+    {
+      name: "uq_disconnect_idempotency",
+      key: { idempotencyKey: 1 },
+      unique: true,
+    },
+    {
+      name: "uq_disconnect_open_number",
+      key: { phoneNumberId: 1 },
+      unique: true,
+      partialFilterExpression: {
+        status: { $in: ["queued", "running", "retrying", "pending"] },
+      },
+    },
+    {
+      name: "ix_disconnect_number_status",
+      key: { phoneNumberId: 1, status: 1 },
+    },
   ],
   port_requests: [
     {
