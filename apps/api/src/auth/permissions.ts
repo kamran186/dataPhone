@@ -11,6 +11,7 @@ export const permissions = [
   "numbers.disconnect",
   "ports.manage",
   "sync.trigger",
+  "jobs.view",
   "audit.view",
   "reports.view",
 ] as const;
@@ -47,6 +48,7 @@ export const initialRoles: ReadonlyArray<{
       "numbers.purchase",
       "ports.manage",
       "audit.view",
+      "jobs.view",
       "reports.view",
     ],
   },

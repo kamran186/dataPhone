@@ -22,6 +22,7 @@ const links = [
   { to: "/", label: "Overview", permission: null },
   { to: "/inventory", label: "Inventory", permission: "inventory.view" },
   { to: "/customers", label: "Customers", permission: "customers.view" },
+  { to: "/jobs", label: "Jobs", permission: "jobs.view" },
   { to: "/users", label: "Users", permission: "users.manage" },
 ];
 

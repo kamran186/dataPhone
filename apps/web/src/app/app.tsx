@@ -6,6 +6,7 @@ import { AppLayout } from "./layout/app-layout";
 import { RequireAuth, RequirePermission } from "./require-auth";
 import { CustomersPage } from "../pages/customers-page";
 import { InventoryPage } from "../pages/inventory-page";
+import { JobsPage } from "../pages/jobs-page";
 import { LoginPage } from "../pages/login-page";
 import { OverviewPage } from "../pages/overview-page";
 import { UsersPage } from "../pages/users-page";
@@ -55,6 +56,14 @@ export function App() {
                   element={
                     <RequirePermission permission="customers.view">
                       <CustomersPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="jobs"
+                  element={
+                    <RequirePermission permission="jobs.view">
+                      <JobsPage />
                     </RequirePermission>
                   }
                 />

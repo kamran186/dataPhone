@@ -11,6 +11,9 @@ import { CarrierRegistryService } from "./carriers/registry";
 import { DatabaseHealthService } from "./database/database-health.service";
 import { DatabaseService } from "./database/database.service";
 import { HealthController } from "./health/health.controller";
+import { JobsController } from "./jobs/jobs.controller";
+import { JobStore } from "./jobs/job.store";
+import { JobWorker } from "./jobs/job.worker";
 import { SystemController } from "./system/system.controller";
 
 @Module({
@@ -21,6 +24,8 @@ import { SystemController } from "./system/system.controller";
     AuthService,
     UsersService,
     CarrierRegistryService,
+    JobStore,
+    JobWorker,
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
   ],
@@ -30,6 +35,7 @@ import { SystemController } from "./system/system.controller";
     AuthController,
     UsersController,
     RolesController,
+    JobsController,
   ],
 })
 export class AppModule {}

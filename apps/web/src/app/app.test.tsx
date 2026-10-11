@@ -8,6 +8,7 @@ import {
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { App } from "./app";
 import { useAuthStore } from "./model/use-auth-store";
+import { useShellStore } from "./model/use-shell-store";
 
 const user = {
   id: "507f1f77bcf86cd799439011",
@@ -17,6 +18,7 @@ const user = {
 };
 
 beforeEach(() => {
+  useShellStore.setState({ menuOpen: false });
   window.history.replaceState({}, "", "/");
   useAuthStore.setState({
     status: "unknown",
@@ -123,4 +125,42 @@ it("requires sign-in and then shows the protected overview", async () => {
   await waitFor(() =>
     expect(screen.getByText("Connected")).toBeInTheDocument(),
   );
+});
+
+it("shows recent jobs to staff with job viewing permission", async () => {
+  useAuthStore.setState({
+    status: "authenticated",
+    accessToken: "staff-token",
+    user: { ...user, permissions: [...user.permissions, "jobs.view"] },
+  });
+  window.history.replaceState({}, "", "/jobs");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => ({
+      ok: true,
+      json: async () =>
+        String(input).endsWith("/jobs")
+          ? {
+              items: [
+                {
+                  id: "job-1",
+                  type: "system.noop",
+                  status: "succeeded",
+                  progress: 100,
+                  attempts: 1,
+                  maxAttempts: 3,
+                  createdAt: "2026-10-11T00:00:00Z",
+                },
+              ],
+            }
+          : { name: "DataPhone", purpose: "Internal DID management" },
+    })),
+  );
+  render(<App />);
+  expect(
+    await screen.findByRole("heading", { name: "Background jobs" }),
+  ).toBeInTheDocument();
+  expect(await screen.findByText("system.noop")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Open navigation" }));
+  expect(screen.getByRole("link", { name: "Jobs" })).toBeInTheDocument();
 });

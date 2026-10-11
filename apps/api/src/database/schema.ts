@@ -172,6 +172,27 @@ export async function initializeCoreSchema(db: Db): Promise<void> {
     { upsert: true },
   );
   await initializeAuthSchema(db);
+  await initializeJobsSchema(db);
+}
+
+async function initializeJobsSchema(db: Db): Promise<void> {
+  await db
+    .collection("job_events")
+    .createIndex(
+      { jobId: 1, sequence: 1 },
+      { name: "uq_job_events_sequence", unique: true },
+    );
+  await db.collection("schema_migrations").updateOne(
+    { _id: "jobs-v1" as never },
+    {
+      $setOnInsert: {
+        version: 1,
+        appliedAt: new Date(),
+        collections: ["background_jobs", "job_events"],
+      },
+    },
+    { upsert: true },
+  );
 }
 
 async function initializeAuthSchema(db: Db): Promise<void> {

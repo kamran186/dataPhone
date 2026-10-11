@@ -32,4 +32,6 @@ An administrator must be initialized once before staff can sign in. See the [loc
 
 The carrier adapter registry and tested mock are described in [carrier integration requirements](docs/carriers/integration-requirements.md). The only enabled real carrier capability is read-only Bandwidth inventory; live access requires DataPhone account credentials.
 
+The [background jobs report](docs/implementation/phase-5-report.md) describes durable processing and live progress. The Jobs screen shows recent job status to authorized staff.
+
 Quality checks: `pnpm typecheck`, `pnpm lint`, `pnpm format:check`, `pnpm test`, and `pnpm build`.
