@@ -20,6 +20,8 @@ import type {
 } from "./domain";
 import { CarrierError, unsupportedCapability } from "./errors";
 import { FetchCarrierTransport } from "./transport";
+import { DatabaseService } from "../database/database.service";
+import { LocalMockAdapter, localMockEnabled } from "./local-mock";
 
 export class CarrierRegistry {
   private readonly adapters: Map<CarrierCode, CarrierAdapter>;
@@ -124,7 +126,7 @@ export class CarrierRegistry {
 
 @Injectable()
 export class CarrierRegistryService extends CarrierRegistry {
-  constructor() {
+  constructor(database: DatabaseService) {
     super([
       new PeerlessSoapAdapter(),
       new BulkVsSoapAdapter(),
@@ -132,6 +134,7 @@ export class CarrierRegistryService extends CarrierRegistry {
         new EnvironmentCarrierCredentialStore(),
         new FetchCarrierTransport(),
       ),
+      ...(localMockEnabled() ? [new LocalMockAdapter(database)] : []),
     ]);
   }
 }

@@ -5,6 +5,7 @@ import {
 } from "@nestjs/common";
 import { ObjectId } from "mongodb";
 import { DatabaseService } from "../database/database.service";
+import { AuditService } from "../ownership/audit.service";
 import { PortCrypto } from "./port.crypto";
 
 export interface PortDocumentRecord {
@@ -29,13 +30,17 @@ function view(document: PortDocumentRecord) {
 
 @Injectable()
 export class PortDocuments {
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly audit: AuditService,
+  ) {}
 
   async upload(
     portRequestId: ObjectId,
     filename: string,
     contentType: string,
     content: Buffer,
+    actorId: ObjectId,
   ) {
     if (
       typeof filename !== "string" ||
@@ -85,9 +90,37 @@ export class PortDocuments {
         byteLength: content.length,
         createdAt: new Date(),
       };
-      await db
-        .collection<PortDocumentRecord>("port_documents")
-        .insertOne(record);
+      await this.database.withTransaction(async (tx, session) => {
+        await tx
+          .collection<PortDocumentRecord>("port_documents")
+          .insertOne(record, { session });
+        await tx.collection("port_events").insertOne(
+          {
+            _id: new ObjectId(),
+            portRequestId,
+            type: "port.document_uploaded",
+            actorId,
+            previous: null,
+            next: {
+              documentId: record._id.toHexString(),
+              filename,
+              byteLength: record.byteLength,
+            },
+            createdAt: record.createdAt,
+          },
+          { session },
+        );
+        await this.audit.append(tx, session, {
+          type: "port.document_uploaded",
+          actorId,
+          customerId: port.customerId as ObjectId | undefined,
+          previous: null,
+          next: {
+            portRequestId: portRequestId.toHexString(),
+            documentId: record._id.toHexString(),
+          },
+        });
+      });
       return view(record);
     } catch (error) {
       await this.database

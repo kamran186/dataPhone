@@ -1,5 +1,6 @@
 import { DatabaseInfrastructure } from "./database.infrastructure";
 import { initialRoles } from "../auth/permissions";
+import { localMockEnabled } from "../carriers/local-mock";
 
 export async function seedCarriers(
   database: DatabaseInfrastructure,
@@ -9,6 +10,9 @@ export async function seedCarriers(
     { code: "peerless", displayName: "Peerless Network" },
     { code: "bulkvs", displayName: "BulkVS" },
     { code: "bandwidth", displayName: "Bandwidth" },
+    ...(localMockEnabled()
+      ? [{ code: "mock", displayName: "Local mock carrier" }]
+      : []),
   ]) {
     await carriers.updateOne(
       { code: carrier.code },

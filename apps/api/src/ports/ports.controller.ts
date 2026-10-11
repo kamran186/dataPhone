@@ -127,12 +127,14 @@ export class PortsController {
   upload(
     @Param("id") id: string,
     @Body() body: { filename: string; contentType: string; base64: string },
+    @Req() request: AuthRequest,
   ) {
     return this.documents.upload(
       objectId(id),
       body.filename,
       body.contentType,
       decodeDocument(body.base64),
+      actor(request),
     );
   }
 

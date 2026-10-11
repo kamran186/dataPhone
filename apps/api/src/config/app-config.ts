@@ -31,6 +31,19 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
     throw new Error("JWT_SECRET must be at least 32 bytes");
   if (environment === "production" && !jwtSecret)
     throw new Error("JWT_SECRET is required in production");
+  const portEncryptionKey = env.DATAPHONE_PORT_ENCRYPTION_KEY;
+  if (environment === "production" && !portEncryptionKey)
+    throw new Error("DATAPHONE_PORT_ENCRYPTION_KEY is required in production");
+  if (portEncryptionKey) {
+    const decoded = Buffer.from(portEncryptionKey, "base64");
+    if (
+      decoded.length !== 32 ||
+      decoded.toString("base64") !== portEncryptionKey
+    )
+      throw new Error(
+        "DATAPHONE_PORT_ENCRYPTION_KEY must be exactly 32 bytes in base64",
+      );
+  }
   const corsOrigin = env.CORS_ORIGIN ?? "http://localhost:5173";
   const origin = new URL(corsOrigin);
   if (!["http:", "https:"].includes(origin.protocol))

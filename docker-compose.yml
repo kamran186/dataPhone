@@ -35,6 +35,7 @@ services:
       MONGO_URI: mongodb://mongo:27017/dataphone?replicaSet=rs0
       CORS_ORIGIN: http://localhost:8080
       DATAPHONE_PORT_ENCRYPTION_KEY: ${DATAPHONE_PORT_ENCRYPTION_KEY:-}
+      DATAPHONE_ENABLE_MOCK_CARRIER: ${DATAPHONE_ENABLE_MOCK_CARRIER:-false}
     depends_on:
       mongo-init:
         condition: service_completed_successfully

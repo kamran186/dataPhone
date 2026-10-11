@@ -4,6 +4,7 @@ import { ObjectId } from "mongodb";
 import { loadConfig } from "../src/config/app-config";
 import { DatabaseService } from "../src/database/database.service";
 import { PortDocuments } from "../src/ports/port.documents";
+import { AuditService } from "../src/ownership/audit.service";
 
 const baseUrl = process.env.DATAPHONE_TEST_MONGO_URL;
 const integration = baseUrl ? describe : describe.skip;
@@ -39,13 +40,14 @@ integration("encrypted port documents", () => {
   });
 
   it("stores only encrypted bytes and rejects cross-port document access", async () => {
-    const service = new PortDocuments(database);
+    const service = new PortDocuments(database, new AuditService(database));
     const plain = Buffer.from("%PDF-1.7 sensitive account evidence");
     const uploaded = await service.upload(
       portId,
       "invoice.pdf",
       "application/pdf",
       plain,
+      new ObjectId(),
     );
     expect((await service.list(portId)).map((item) => item.id)).toContain(
       uploaded.id,
@@ -56,6 +58,16 @@ integration("encrypted port documents", () => {
       .findOne({ _id: new ObjectId(uploaded.id) });
     const stored = await database.downloadDocument(metadata!.fileId);
     expect(stored.includes(plain)).toBe(false);
+    expect(await new AuditService(database).verify()).toMatchObject({
+      valid: true,
+      count: 1,
+    });
+    expect(
+      await database.nativeDb().collection("port_events").countDocuments({
+        portRequestId: portId,
+        type: "port.document_uploaded",
+      }),
+    ).toBe(1);
     expect(
       (await service.download(portId, new ObjectId(uploaded.id))).content,
     ).toEqual(plain);
@@ -63,7 +75,13 @@ integration("encrypted port documents", () => {
       service.download(new ObjectId(), new ObjectId(uploaded.id)),
     ).rejects.toThrow("Document not found");
     await expect(
-      service.upload(portId, "bad.exe", "application/octet-stream", plain),
+      service.upload(
+        portId,
+        "bad.exe",
+        "application/octet-stream",
+        plain,
+        new ObjectId(),
+      ),
     ).rejects.toThrow("Unsupported");
   });
 });

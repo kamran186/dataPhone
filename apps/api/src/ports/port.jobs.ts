@@ -71,17 +71,16 @@ export class PortJobs implements OnModuleInit, OnModuleDestroy {
       .find(
         {
           status: { $in: ["SUBMITTED", "DATE_CONFIRMED"] },
-          nativeOrderId: { $exists: true },
         },
-        { projection: { _id: 1 } },
+        { projection: { _id: 1, nativeOrderId: 1 } },
       )
       .limit(1000)
       .toArray();
     for (const port of ports)
       await this.jobs.create({
-        type: "port.track",
+        type: port.nativeOrderId ? "port.track" : "port.submit",
         payload: { portId: port._id.toHexString() },
-        idempotencyKey: `port-recover:${port._id.toHexString()}:${slot}`,
+        idempotencyKey: `port-recover:${port._id.toHexString()}:${port.nativeOrderId ? "track" : "submit"}:${slot}`,
         maxAttempts: 5,
       });
   }

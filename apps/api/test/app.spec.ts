@@ -37,6 +37,21 @@ describe("configuration", () => {
         JWT_SECRET: "too-short",
       }),
     ).toThrow("at least 32 bytes");
+    expect(() =>
+      loadConfig({
+        NODE_ENV: "production",
+        MONGO_URI: "mongodb://localhost:27017/dataphone",
+        JWT_SECRET: "x".repeat(32),
+      }),
+    ).toThrow("DATAPHONE_PORT_ENCRYPTION_KEY is required");
+    expect(() =>
+      loadConfig({
+        NODE_ENV: "production",
+        MONGO_URI: "mongodb://localhost:27017/dataphone",
+        JWT_SECRET: "x".repeat(32),
+        DATAPHONE_PORT_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
+      }),
+    ).not.toThrow();
   });
 });
 

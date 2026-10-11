@@ -313,6 +313,36 @@ integration("persistent job processing", () => {
       } finally {
         abort.abort();
       }
+      const queuedEvent = (await store.listEvents(job._id))[0];
+      await store.claim("sse-reconnect", 1_000);
+      const reconnect = new AbortController();
+      try {
+        const resumed = await fetch(
+          `${root}/jobs/${job._id.toHexString()}/events`,
+          {
+            headers: {
+              ...headers,
+              "Last-Event-ID": String(queuedEvent.sequence),
+            },
+            signal: reconnect.signal,
+          },
+        );
+        expect(resumed.status).toBe(200);
+        const reader = resumed.body!.getReader();
+        let frames = "";
+        for (
+          let index = 0;
+          index < 5 && !frames.includes("started");
+          index += 1
+        ) {
+          const chunk = await reader.read();
+          frames += new TextDecoder().decode(chunk.value);
+        }
+        expect(frames).toContain("started");
+        expect(frames).not.toContain("queued");
+      } finally {
+        reconnect.abort();
+      }
     } finally {
       await app?.close();
       if (previousUri === undefined) delete process.env.MONGO_URI;
