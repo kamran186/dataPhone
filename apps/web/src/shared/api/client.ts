@@ -1,12 +1,19 @@
 import type { ApiError } from "@dataphone/shared";
 import { useAuthStore } from "../../app/model/use-auth-store";
 
-export async function getJson<T>(path: string): Promise<T> {
+export async function authorizedFetch(
+  path: string,
+  init: RequestInit = {},
+): Promise<Response> {
   const fetchWithToken = () => {
     const token = useAuthStore.getState().accessToken;
     return fetch(path, {
+      ...init,
       credentials: "same-origin",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      headers: {
+        ...init.headers,
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
     });
   };
   let response = await fetchWithToken();
@@ -14,6 +21,11 @@ export async function getJson<T>(path: string): Promise<T> {
     if (await useAuthStore.getState().refresh())
       response = await fetchWithToken();
   }
+  return response;
+}
+
+export async function getJson<T>(path: string): Promise<T> {
+  const response = await authorizedFetch(path);
   if (!response.ok) {
     let body: Partial<ApiError> = {};
     try {

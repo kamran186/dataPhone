@@ -14,6 +14,13 @@ import { HealthController } from "./health/health.controller";
 import { JobsController } from "./jobs/jobs.controller";
 import { JobStore } from "./jobs/job.store";
 import { JobWorker } from "./jobs/job.worker";
+import {
+  CarriersController,
+  NumbersController,
+  ReconciliationController,
+} from "./inventory/inventory.controller";
+import { InventoryJobs } from "./inventory/inventory.jobs";
+import { InventoryService } from "./inventory/inventory.service";
 import { SystemController } from "./system/system.controller";
 
 @Module({
@@ -26,6 +33,8 @@ import { SystemController } from "./system/system.controller";
     CarrierRegistryService,
     JobStore,
     JobWorker,
+    InventoryService,
+    InventoryJobs,
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
   ],
@@ -36,6 +45,9 @@ import { SystemController } from "./system/system.controller";
     UsersController,
     RolesController,
     JobsController,
+    NumbersController,
+    CarriersController,
+    ReconciliationController,
   ],
 })
 export class AppModule {}

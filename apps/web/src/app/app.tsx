@@ -6,6 +6,7 @@ import { AppLayout } from "./layout/app-layout";
 import { RequireAuth, RequirePermission } from "./require-auth";
 import { CustomersPage } from "../pages/customers-page";
 import { InventoryPage } from "../pages/inventory-page";
+import { NumberDetailPage } from "../pages/number-detail-page";
 import { JobsPage } from "../pages/jobs-page";
 import { LoginPage } from "../pages/login-page";
 import { OverviewPage } from "../pages/overview-page";
@@ -48,6 +49,14 @@ export function App() {
                   element={
                     <RequirePermission permission="inventory.view">
                       <InventoryPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="inventory/:id"
+                  element={
+                    <RequirePermission permission="inventory.view">
+                      <NumberDetailPage />
                     </RequirePermission>
                   }
                 />

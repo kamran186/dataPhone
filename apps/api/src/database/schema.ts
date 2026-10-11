@@ -129,6 +129,12 @@ const indexes: Record<string, IndexDescription[]> = {
   ],
   reconciliation_issues: [
     { name: "ix_reconciliation_status", key: { status: 1, detectedAt: -1 } },
+    {
+      name: "uq_reconciliation_open_identity",
+      key: { carrierAccountId: 1, e164: 1, type: 1 },
+      unique: true,
+      partialFilterExpression: { status: "open" },
+    },
   ],
   operation_outbox: [
     { name: "ix_outbox_dispatch", key: { status: 1, availableAt: 1 } },

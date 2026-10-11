@@ -17,7 +17,7 @@ See [the architecture](docs/architecture/system.md) and [the feasibility report]
 
 ## Run the application
 
-The application has employee sign-in and permission-protected foundation screens. Carrier data and business workflows are delivered in later phases. Keep this local build on a private machine.
+The application has employee sign-in, permission-protected pages, background jobs, and a unified number inventory. Keep this local build on a private machine.
 
 ```sh
 pnpm install
@@ -33,5 +33,7 @@ An administrator must be initialized once before staff can sign in. See the [loc
 The carrier adapter registry and tested mock are described in [carrier integration requirements](docs/carriers/integration-requirements.md). The only enabled real carrier capability is read-only Bandwidth inventory; live access requires DataPhone account credentials.
 
 The [background jobs report](docs/implementation/phase-5-report.md) describes durable processing and live progress. The Jobs screen shows recent job status to authorized staff.
+
+The [inventory report](docs/implementation/phase-6-report.md) describes carrier accounts, scheduled and manual synchronization, reconciliation, search, and exports. Add a carrier account with `POST /api/v1/carriers/{carrierId}/accounts` using an external account ID and an environment variable name as `credentialRef`. The sync endpoint takes the resulting **account ID**. Only Bandwidth read-only inventory is enabled for live carrier access; Peerless and BulkVS remain unavailable pending contracts.
 
 Quality checks: `pnpm typecheck`, `pnpm lint`, `pnpm format:check`, `pnpm test`, and `pnpm build`.

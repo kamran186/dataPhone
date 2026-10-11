@@ -1,6 +1,7 @@
 import { Inject, Injectable, OnModuleDestroy } from "@nestjs/common";
 import { APP_CONFIG, AppConfig } from "../config/app-config";
 import { DatabaseInfrastructure } from "./database.infrastructure";
+import { seedCarriers } from "./seed";
 
 @Injectable()
 export class DatabaseService
@@ -26,6 +27,7 @@ export class DatabaseService
   private async initialize(): Promise<void> {
     await this.connect();
     await this.initializeSchema();
+    await seedCarriers(this);
   }
 
   async onModuleDestroy(): Promise<void> {

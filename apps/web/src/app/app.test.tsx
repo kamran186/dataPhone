@@ -164,3 +164,81 @@ it("shows recent jobs to staff with job viewing permission", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Open navigation" }));
   expect(screen.getByRole("link", { name: "Jobs" })).toBeInTheDocument();
 });
+
+it("shows synced numbers and their holding history", async () => {
+  useAuthStore.setState({
+    status: "authenticated",
+    accessToken: "staff-token",
+    user: {
+      ...user,
+      permissions: [...user.permissions, "inventory.manage", "sync.trigger"],
+    },
+  });
+  window.history.replaceState({}, "", "/inventory");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      const data = path.includes("/numbers/number-1")
+        ? {
+            e164: "+18043024183",
+            status: "active",
+            carrier: "mock",
+            carrierAccount: "fixture",
+            firstSeenAt: "2026-10-11T00:00:00Z",
+            lastSeenAt: "2026-10-11T00:00:00Z",
+            holdings: [{ status: "active", startedAt: "2026-10-11T00:00:00Z" }],
+            assignments: [],
+          }
+        : path.includes("/numbers?")
+          ? {
+              items: [
+                {
+                  id: "number-1",
+                  e164: "+18043024183",
+                  status: "active",
+                  carrier: "mock",
+                  updatedAt: "2026-10-11T00:00:00Z",
+                },
+              ],
+              total: 1,
+              pageSize: 50,
+            }
+          : path.endsWith("/carriers")
+            ? [
+                {
+                  id: "carrier-1",
+                  code: "mock",
+                  displayName: "Mock",
+                  capabilities: ["inventory.list"],
+                  accounts: [
+                    {
+                      id: "account-1",
+                      externalAccountId: "fixture",
+                      status: "active",
+                      lastSync: {
+                        status: "succeeded",
+                        startedAt: "2026-10-11T00:00:00Z",
+                        seen: 1,
+                        issues: 0,
+                      },
+                    },
+                  ],
+                },
+              ]
+            : path.includes("/reconciliation/issues")
+              ? []
+              : { name: "DataPhone", purpose: "Internal DID management" };
+      return { ok: true, json: async () => data };
+    }),
+  );
+  render(<App />);
+  expect(
+    await screen.findByRole("link", { name: "+18043024183" }),
+  ).toBeInTheDocument();
+  expect(screen.getByText(/Latest sync succeeded/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("link", { name: "+18043024183" }));
+  expect(
+    await screen.findByRole("heading", { name: "Carrier holding history" }),
+  ).toBeInTheDocument();
+});

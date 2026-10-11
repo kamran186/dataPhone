@@ -1,17 +1,306 @@
+import {
+  Alert,
+  Button,
+  CircularProgress,
+  MenuItem,
+  Paper,
+  Select,
+  Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
+  TextField,
+  Typography,
+} from "@mui/material";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { Link } from "react-router-dom";
+import { useAuthStore } from "../app/model/use-auth-store";
+import { authorizedFetch, getJson } from "../shared/api/client";
 import { PageHeader } from "../shared/ui/page-header";
-import { EmptyState } from "../shared/ui/empty-state";
+
+interface NumberRow {
+  id: string;
+  e164: string;
+  status: string;
+  carrier?: string;
+  customerName?: string;
+  updatedAt: string;
+}
+interface CarrierRow {
+  id: string;
+  displayName: string;
+  code: string;
+  capabilities: string[];
+  accounts: Array<{
+    id: string;
+    externalAccountId: string;
+    status: string;
+    lastSyncedAt?: string;
+    lastSync?: {
+      status: string;
+      startedAt: string;
+      seen: number;
+      issues: number;
+      errorCode?: string;
+    };
+  }>;
+}
 
 export function InventoryPage() {
+  const queryClient = useQueryClient();
+  const user = useAuthStore((state) => state.user);
+  const [search, setSearch] = useState("");
+  const [customer, setCustomer] = useState("");
+  const [carrier, setCarrier] = useState("");
+  const [status, setStatus] = useState("");
+  const [sort, setSort] = useState("e164");
+  const [page, setPage] = useState(1);
+  const [notice, setNotice] = useState("");
+  const params = new URLSearchParams({
+    page: String(page),
+    pageSize: "50",
+    sort,
+  });
+  if (search) params.set("search", search);
+  if (customer) params.set("customer", customer);
+  if (carrier) params.set("carrier", carrier);
+  if (status) params.set("status", status);
+  const query = params.toString();
+  const numbers = useQuery({
+    queryKey: ["numbers", query],
+    refetchInterval: 30_000,
+    queryFn: () =>
+      getJson<{ items: NumberRow[]; total: number; pageSize: number }>(
+        `/api/v1/numbers?${query}`,
+      ),
+  });
+  const carriers = useQuery({
+    queryKey: ["carriers"],
+    refetchInterval: 15_000,
+    queryFn: () => getJson<CarrierRow[]>("/api/v1/carriers"),
+  });
+  const issues = useQuery({
+    queryKey: ["reconciliation", "open"],
+    refetchInterval: 30_000,
+    enabled: Boolean(user?.permissions.includes("inventory.manage")),
+    queryFn: () =>
+      getJson<Array<{ id: string }>>(
+        "/api/v1/reconciliation/issues?status=open",
+      ),
+  });
+
+  async function exportFile(format: "csv" | "xlsx") {
+    try {
+      const response = await authorizedFetch(
+        `/api/v1/numbers/export?${query}&format=${format}`,
+      );
+      if (!response.ok) throw new Error(`Export failed (${response.status})`);
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `dataphone-inventory.${format}`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Export failed");
+    }
+  }
+
+  async function sync(accountId: string) {
+    try {
+      const response = await authorizedFetch(
+        `/api/v1/carriers/${accountId}/sync`,
+        { method: "POST" },
+      );
+      if (!response.ok)
+        throw new Error(`Sync could not start (${response.status})`);
+      setNotice("Synchronization queued. Track progress on the Jobs page.");
+      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    } catch (error) {
+      setNotice(
+        error instanceof Error ? error.message : "Sync could not start",
+      );
+    }
+  }
+
   return (
-    <>
+    <Stack spacing={3}>
       <PageHeader
         title="Inventory"
-        description="Search and manage numbers across connected carriers."
+        description="Search numbers across connected carriers."
       />
-      <EmptyState
-        title="No numbers available"
-        detail="Connect a carrier account and synchronize its inventory to see numbers here."
-      />
-    </>
+      {notice && (
+        <Alert
+          severity={notice.startsWith("Synchronization") ? "success" : "error"}
+        >
+          {notice}
+        </Alert>
+      )}
+      <Paper sx={{ p: 2 }}>
+        <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
+          <TextField
+            label="Number contains"
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setPage(1);
+            }}
+            size="small"
+          />
+          <TextField
+            label="Customer name"
+            value={customer}
+            onChange={(event) => {
+              setCustomer(event.target.value);
+              setPage(1);
+            }}
+            size="small"
+          />
+          <Select
+            value={carrier}
+            onChange={(event) => {
+              setCarrier(event.target.value);
+              setPage(1);
+            }}
+            size="small"
+            displayEmpty
+            inputProps={{ "aria-label": "Carrier filter" }}
+          >
+            <MenuItem value="">All carriers</MenuItem>
+            {carriers.data?.map((item) => (
+              <MenuItem key={item.id} value={item.code}>
+                {item.displayName}
+              </MenuItem>
+            ))}
+          </Select>
+          <Select
+            value={status}
+            onChange={(event) => {
+              setStatus(event.target.value);
+              setPage(1);
+            }}
+            size="small"
+            displayEmpty
+            inputProps={{ "aria-label": "Status filter" }}
+          >
+            <MenuItem value="">All statuses</MenuItem>
+            <MenuItem value="active">Active</MenuItem>
+            <MenuItem value="missing">Missing</MenuItem>
+          </Select>
+          <Select
+            value={sort}
+            onChange={(event) => setSort(event.target.value)}
+            size="small"
+            inputProps={{ "aria-label": "Sort by" }}
+          >
+            <MenuItem value="e164">Number</MenuItem>
+            <MenuItem value="updatedAt">Updated</MenuItem>
+            <MenuItem value="status">Status</MenuItem>
+          </Select>
+        </Stack>
+        <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
+          <Button onClick={() => void exportFile("csv")}>Export CSV</Button>
+          <Button onClick={() => void exportFile("xlsx")}>Export Excel</Button>
+        </Stack>
+      </Paper>
+      {numbers.isPending && <CircularProgress aria-label="Loading inventory" />}
+      {numbers.isError && (
+        <Alert severity="error">
+          Unable to load inventory. Check the search filters.
+        </Alert>
+      )}
+      {numbers.data && (
+        <Paper sx={{ overflowX: "auto" }}>
+          <Table aria-label="Inventory numbers">
+            <TableHead>
+              <TableRow>
+                <TableCell>Number</TableCell>
+                <TableCell>Status</TableCell>
+                <TableCell>Carrier</TableCell>
+                <TableCell>Customer</TableCell>
+                <TableCell>Updated</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {numbers.data.items.map((number) => (
+                <TableRow key={number.id}>
+                  <TableCell>
+                    <Link to={`/inventory/${number.id}`}>{number.e164}</Link>
+                  </TableCell>
+                  <TableCell>{number.status}</TableCell>
+                  <TableCell>{number.carrier ?? "—"}</TableCell>
+                  <TableCell>{number.customerName ?? "Unassigned"}</TableCell>
+                  <TableCell>
+                    {new Date(number.updatedAt).toLocaleString()}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          {numbers.data.items.length === 0 && (
+            <Typography sx={{ p: 2 }}>
+              No numbers match these filters.
+            </Typography>
+          )}
+          <Stack
+            direction="row"
+            spacing={1}
+            sx={{ p: 2, alignItems: "center" }}
+          >
+            <Typography sx={{ flexGrow: 1 }}>
+              {numbers.data.total} numbers · page {page}
+            </Typography>
+            <Button disabled={page === 1} onClick={() => setPage(page - 1)}>
+              Previous
+            </Button>
+            <Button
+              disabled={page * numbers.data.pageSize >= numbers.data.total}
+              onClick={() => setPage(page + 1)}
+            >
+              Next
+            </Button>
+          </Stack>
+        </Paper>
+      )}
+      {user?.permissions.includes("sync.trigger") && carriers.data && (
+        <Paper sx={{ p: 2 }}>
+          <Typography variant="h6">Carrier synchronization</Typography>
+          {carriers.data.flatMap((item) =>
+            item.accounts.map((account) => (
+              <Stack
+                key={account.id}
+                direction="row"
+                spacing={2}
+                sx={{ mt: 1, alignItems: "center" }}
+              >
+                <Typography sx={{ flexGrow: 1 }}>
+                  {item.displayName} · {account.externalAccountId} ·{" "}
+                  {account.lastSync
+                    ? `Latest sync ${account.lastSync.status} (${new Date(account.lastSync.startedAt).toLocaleString()}) · ${account.lastSync.seen} seen · ${account.lastSync.issues} issues${account.lastSync.errorCode ? ` · ${account.lastSync.errorCode}` : ""}`
+                    : "Not yet synced"}
+                </Typography>
+                <Button
+                  disabled={
+                    !item.capabilities.includes("inventory.list") ||
+                    account.status !== "active"
+                  }
+                  onClick={() => void sync(account.id)}
+                >
+                  Sync now
+                </Button>
+              </Stack>
+            )),
+          )}
+        </Paper>
+      )}
+      {issues.data && issues.data.length > 0 && (
+        <Alert severity="warning">
+          {issues.data.length} open reconciliation issues need review.
+        </Alert>
+      )}
+    </Stack>
   );
 }

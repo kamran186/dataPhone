@@ -5,3 +5,5 @@ allowBuilds:
   "@parcel/watcher": true
   "@scarf/scarf": false
   unrs-resolver: true
+overrides:
+  "exceljs>uuid": "11.1.1"
