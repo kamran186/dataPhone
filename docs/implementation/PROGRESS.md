@@ -5,7 +5,7 @@ Each phase is created from the latest verified `Prod`. A phase is marked `PUSHED
 | Phase | Name | Status | Implementation completion | Test results | Commit hash | Push status | Blockers |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 0 | Architecture discovery and validation | COMPLETED | Architecture documents and local feasibility probe implemented | 7/7 local checks passed; dependency audit clear | `f852f1a6d57e6b3abc41f5db33a72d01d9a18806` | Verified on `phase-0-architecture` and `Prod` | Peerless WSDL and carrier credentials absent |
-| 1 | Project foundation | TESTED | API, web, shared package, and Compose foundation implemented | API 7/7, web 1/1, type/lint/format/build, audit clear, Compose smoke passed | Pending commit | Not pushed | — |
+| 1 | Project foundation | COMPLETED | API, web, shared package, and Compose foundation implemented | API 7/7, web 1/1, type/lint/format/build, audit clear, Compose smoke passed | `f0723f256a123d23ef8d92661efaf5413d9908f7` | Verified on `phase-1-foundation` and `Prod` | — |
 | 2 | Database and TypeORM infrastructure | NOT_STARTED | Not started | Not run | — | Not pushed | — |
 | 3 | Authentication and user management | NOT_STARTED | Not started | Not run | — | Not pushed | — |
 | 4 | Multi-carrier adapter framework | NOT_STARTED | Not started | Not run | — | Not pushed | Peerless WSDL absent |
