@@ -3,7 +3,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test:feasibility": "node --test test/feasibility.test.mjs"
+    "test:feasibility": "node --test test/feasibility.test.mjs",
+    "build": "pnpm -r --if-present build",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "lint": "eslint apps packages",
+    "format:check": "prettier --check 'apps/**/*.{ts,tsx,json,cjs,html}' 'packages/**/*.{ts,json}' docker-compose.yml pnpm-workspace.yaml package.json",
+    "test": "pnpm -r --if-present test"
   },
   "dependencies": {
     "@nestjs/common": "12.1.2",
@@ -13,5 +18,12 @@
     "rxjs": "7.8.2",
     "typeorm": "1.1.2"
   },
-  "packageManager": "pnpm@12.4.2"
+  "packageManager": "pnpm@12.4.2",
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.12.0",
+    "globals": "16.5.0",
+    "prettier": "3.9.10",
+    "typescript-eslint": "8.71.1"
+  }
 }

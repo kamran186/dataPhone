@@ -1,0 +1,55 @@
+services:
+  mongo:
+    image: mongo:7.0
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    volumes:
+      - mongo_data:/data/db
+    networks: [dataphone]
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mongosh --quiet --eval 'db.adminCommand({ping:1}).ok' | grep -q 1",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  mongo-init:
+    image: mongo:7.0
+    depends_on:
+      mongo:
+        condition: service_healthy
+    volumes:
+      - ./infrastructure/scripts/init-replica.sh:/init-replica.sh:ro
+    entrypoint: ["sh", "/init-replica.sh"]
+    networks: [dataphone]
+
+  api:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/api.Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      MONGO_URI: mongodb://mongo:27017/dataphone?replicaSet=rs0
+      CORS_ORIGIN: http://localhost:8080
+    depends_on:
+      mongo-init:
+        condition: service_completed_successfully
+    networks: [dataphone]
+
+  web:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/web.Dockerfile
+    ports:
+      - "127.0.0.1:8080:80"
+    depends_on: [api]
+    networks: [dataphone]
+
+volumes:
+  mongo_data:
+
+networks:
+  dataphone:
