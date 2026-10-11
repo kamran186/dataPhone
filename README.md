@@ -15,9 +15,9 @@ Do not point this probe at a production database. The URL must have access to cr
 
 See [the architecture](docs/architecture/system.md) and [the feasibility report](docs/implementation/phase-0-report.md) before implementing business features.
 
-## Run the Phase 1 application
+## Run the application
 
-The current application contains the foundation screens and service endpoints. Carrier data and staff authentication are delivered in later phases; keep this build on a private machine.
+The application has employee sign-in and permission-protected foundation screens. Carrier data and business workflows are delivered in later phases. Keep this local build on a private machine.
 
 ```sh
 pnpm install
@@ -27,5 +27,7 @@ pnpm --filter @dataphone/web dev
 ```
 
 The MongoDB server must run as a replica set for later transaction and change-stream features. See [deployment notes](docs/deployment/local.md). For a local container run, use `docker compose up --build -d` and open `http://localhost:8080`.
+
+An administrator must be initialized once before staff can sign in. See the [local deployment instructions](docs/deployment/local.md) for the bootstrap command and secret handling.
 
 Quality checks: `pnpm typecheck`, `pnpm lint`, `pnpm format:check`, `pnpm test`, and `pnpm build`.

@@ -1,0 +1,13 @@
+# Employee authentication and authorization
+
+Phase 3 defines four initial roles: Super Admin, Operations Manager, Operations Staff, and Viewer. Each role maps to granular permissions. The API enforces permissions through guards; frontend checks only hide or show navigation. No role grants an audit update or delete permission. The role catalog is seeded idempotently, while user creation and role assignment require administrator permissions.
+
+Passwords use Node's scrypt with `N=2^17`, `r=8`, `p=1`, a random 16-byte salt, and a 64-byte derived value. The stored representation includes parameters and salt, never plaintext. This follows the [OWASP Password Storage Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html). A dummy hash is verified for unknown accounts to reduce timing differences, and invalid logins return the same message. Failed attempts are counted in MongoDB for 15 minutes, with a five-attempt limit per email and source IP.
+
+Access tokens are HS256 JWTs signed with a key of at least 32 bytes, scoped to the DataPhone issuer and API audience, and expire after 15 minutes. The API verifies signature, algorithm, issuer, audience, expiry, active user status, and token version on every protected request. A role or active-state change increments the user's token version and invalidates earlier access tokens. Production startup requires `JWT_SECRET`; local development can use an ephemeral key.
+
+Refresh credentials are random opaque tokens stored only as SHA-256 hashes in MongoDB sessions, with a seven-day expiry and TTL index. The browser receives them in an HttpOnly, SameSite=Strict cookie restricted to `/api/v1/auth`; production mode marks it Secure. A successful refresh rotates the secret with one atomic compare-and-swap, so a previous token cannot be reused. Logout revokes the session and increments the user token version. Browser access tokens stay in memory, and the frontend refreshes on reload or an expired access token.
+
+Authentication sessions, login-attempt TTL indexes, and the administrator concurrency guard are initialized as the separate, rerunnable `auth-v1` schema migration. The `core-v1` migration from Phase 2 remains unchanged.
+
+Cookie-based authentication requests check the Origin header when present. Deploy behind HTTPS, set the external origin in `CORS_ORIGIN`, and use a stable signing secret shared by all API instances. This phase does not introduce carrier credentials. Authorization remains mandatory for every later business endpoint; the global guard denies anonymous access unless the route is explicitly marked public.

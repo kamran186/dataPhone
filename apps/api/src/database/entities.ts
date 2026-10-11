@@ -47,7 +47,15 @@ const definitions = [
   {
     name: "User",
     collection: "users",
-    fields: ["emailNormalized", "passwordHash", "active"],
+    fields: [
+      "email",
+      "emailNormalized",
+      "displayName",
+      "passwordHash",
+      "roleKeys",
+      "active",
+      "tokenVersion",
+    ],
   },
   { name: "Role", collection: "roles", fields: ["key", "name"] },
   { name: "Carrier", collection: "carriers", fields: ["code", "displayName"] },
@@ -139,7 +147,15 @@ export const coreEntities = [
     for (const field of definition.fields) {
       columns[field] = {
         type:
-          field === "active" ? Boolean : dateFields.has(field) ? Date : String,
+          field === "active"
+            ? Boolean
+            : field === "roleKeys"
+              ? "simple-array"
+              : field === "tokenVersion"
+                ? Number
+                : dateFields.has(field)
+                  ? Date
+                  : String,
       };
     }
     return new EntitySchema({

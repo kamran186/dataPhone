@@ -224,6 +224,9 @@ importers:
       class-validator:
         specifier: 0.15.1
         version: 0.15.1
+      jose:
+        specifier: 6.2.12
+        version: 6.2.12
       mongodb:
         specifier: 7.7.0
         version: 7.7.0
@@ -2497,6 +2500,9 @@ packages:
     peerDependenciesMeta:
       node-notifier:
         optional: true
+
+  jose@6.2.12:
+    resolution: {integrity: sha512-9NiFmJEex0sy2Dk58j2UGBSHgUs2ypF9eZSu4L6vjOX3Dp96Sw1F3uL+H+D1sx02jZZdzUT0HgvCy59CuvXcWw==}
 
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
@@ -6115,6 +6121,8 @@ snapshots:
       - esbuild-register
       - supports-color
       - ts-node
+
+  jose@6.2.12: {}
 
   js-tokens@4.0.0: {}
 

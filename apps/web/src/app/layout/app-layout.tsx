@@ -14,17 +14,20 @@ import {
 } from "@mui/material";
 import { NavLink, Outlet } from "react-router-dom";
 import { useSystemInfo } from "../../entities/system/api/use-system-info";
+import { useAuthStore } from "../model/use-auth-store";
 import { useShellStore } from "../model/use-shell-store";
 
 const drawerWidth = 232;
 const links = [
-  { to: "/", label: "Overview" },
-  { to: "/inventory", label: "Inventory" },
-  { to: "/customers", label: "Customers" },
+  { to: "/", label: "Overview", permission: null },
+  { to: "/inventory", label: "Inventory", permission: "inventory.view" },
+  { to: "/customers", label: "Customers", permission: "customers.view" },
+  { to: "/users", label: "Users", permission: "users.manage" },
 ];
 
 function Navigation() {
   const closeMenu = useShellStore((state) => state.closeMenu);
+  const user = useAuthStore((state) => state.user);
   return (
     <Stack
       component="nav"
@@ -32,26 +35,31 @@ function Navigation() {
       spacing={0.5}
       sx={{ p: 2 }}
     >
-      {links.map(({ to, label }) => (
-        <Button
-          key={to}
-          component={NavLink}
-          to={to}
-          onClick={closeMenu}
-          sx={{
-            justifyContent: "flex-start",
-            textTransform: "none",
-            color: "text.primary",
-            "&.active": {
-              bgcolor: "primary.light",
-              color: "primary.dark",
-              fontWeight: 700,
-            },
-          }}
-        >
-          {label}
-        </Button>
-      ))}
+      {links
+        .filter(
+          ({ permission }) =>
+            !permission || user?.permissions.includes(permission),
+        )
+        .map(({ to, label }) => (
+          <Button
+            key={to}
+            component={NavLink}
+            to={to}
+            onClick={closeMenu}
+            sx={{
+              justifyContent: "flex-start",
+              textTransform: "none",
+              color: "text.primary",
+              "&.active": {
+                bgcolor: "primary.light",
+                color: "primary.dark",
+                fontWeight: 700,
+              },
+            }}
+          >
+            {label}
+          </Button>
+        ))}
     </Stack>
   );
 }
@@ -62,6 +70,8 @@ export function AppLayout() {
   const menuOpen = useShellStore((state) => state.menuOpen);
   const toggleMenu = useShellStore((state) => state.toggleMenu);
   const system = useSystemInfo();
+  const user = useAuthStore((state) => state.user);
+  const logout = useAuthStore((state) => state.logout);
 
   return (
     <Box
@@ -113,6 +123,15 @@ export function AppLayout() {
                   : "API unavailable"
             }
           />
+          <Typography
+            variant="body2"
+            sx={{ display: { xs: "none", sm: "block" } }}
+          >
+            {user?.email}
+          </Typography>
+          <Button onClick={() => void logout()} size="small">
+            Sign out
+          </Button>
         </Toolbar>
       </AppBar>
       <Drawer

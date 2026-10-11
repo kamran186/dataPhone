@@ -3,6 +3,7 @@ export interface AppConfig {
   mongoUri: string;
   corsOrigin: string;
   environment: "development" | "test" | "production";
+  jwtSecret?: string;
 }
 
 export const APP_CONFIG = Symbol("APP_CONFIG");
@@ -25,6 +26,11 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
   const environment = env.NODE_ENV ?? "development";
   if (!["development", "test", "production"].includes(environment))
     throw new Error("NODE_ENV is invalid");
+  const jwtSecret = env.JWT_SECRET;
+  if (jwtSecret && Buffer.byteLength(jwtSecret, "utf8") < 32)
+    throw new Error("JWT_SECRET must be at least 32 bytes");
+  if (environment === "production" && !jwtSecret)
+    throw new Error("JWT_SECRET is required in production");
   const corsOrigin = env.CORS_ORIGIN ?? "http://localhost:5173";
   const origin = new URL(corsOrigin);
   if (!["http:", "https:"].includes(origin.protocol))
@@ -34,5 +40,6 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
     mongoUri,
     corsOrigin: origin.origin,
     environment: environment as AppConfig["environment"],
+    jwtSecret,
   };
 }

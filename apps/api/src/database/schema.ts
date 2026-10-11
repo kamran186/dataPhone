@@ -2,7 +2,7 @@ import { Db, IndexDescription } from "mongodb";
 
 export const CORE_SCHEMA_VERSION = 1;
 
-const collections = [
+const coreCollections = [
   "users",
   "roles",
   "customers",
@@ -22,6 +22,8 @@ const collections = [
   "operation_outbox",
   "security_audit_events",
 ] as const;
+
+const authCollections = ["auth_sessions", "login_attempts"] as const;
 
 const indexes: Record<string, IndexDescription[]> = {
   users: [
@@ -141,10 +143,21 @@ const indexes: Record<string, IndexDescription[]> = {
     { name: "ix_security_audit_time", key: { createdAt: -1 } },
     { name: "ix_security_audit_actor", key: { actorId: 1, createdAt: -1 } },
   ],
+  auth_sessions: [
+    { name: "ix_auth_sessions_user", key: { userId: 1, expiresAt: 1 } },
+    { name: "ttl_auth_sessions", key: { expiresAt: 1 }, expireAfterSeconds: 0 },
+  ],
+  login_attempts: [
+    {
+      name: "ttl_login_attempts",
+      key: { expiresAt: 1 },
+      expireAfterSeconds: 0,
+    },
+  ],
 };
 
 export async function initializeCoreSchema(db: Db): Promise<void> {
-  for (const name of collections) {
+  for (const name of coreCollections) {
     await db.collection(name).createIndexes(indexes[name]);
   }
   await db.collection("schema_migrations").updateOne(
@@ -153,7 +166,32 @@ export async function initializeCoreSchema(db: Db): Promise<void> {
       $setOnInsert: {
         version: CORE_SCHEMA_VERSION,
         appliedAt: new Date(),
-        collections: [...collections],
+        collections: [...coreCollections],
+      },
+    },
+    { upsert: true },
+  );
+  await initializeAuthSchema(db);
+}
+
+async function initializeAuthSchema(db: Db): Promise<void> {
+  for (const name of authCollections) {
+    await db.collection(name).createIndexes(indexes[name]);
+  }
+  await db
+    .collection("auth_admin_guard")
+    .updateOne(
+      { _id: "last-admin" as never },
+      { $setOnInsert: { revision: 0 } },
+      { upsert: true },
+    );
+  await db.collection("schema_migrations").updateOne(
+    { _id: "auth-v1" as never },
+    {
+      $setOnInsert: {
+        version: 1,
+        appliedAt: new Date(),
+        collections: [...authCollections, "auth_admin_guard"],
       },
     },
     { upsert: true },

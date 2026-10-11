@@ -22,6 +22,22 @@ describe("configuration", () => {
       }),
     ).toThrow("PORT");
   });
+
+  it("requires a strong JWT secret in production", () => {
+    expect(() =>
+      loadConfig({
+        NODE_ENV: "production",
+        MONGO_URI: "mongodb://localhost:27017/dataphone",
+      }),
+    ).toThrow("JWT_SECRET is required");
+    expect(() =>
+      loadConfig({
+        NODE_ENV: "production",
+        MONGO_URI: "mongodb://localhost:27017/dataphone",
+        JWT_SECRET: "too-short",
+      }),
+    ).toThrow("at least 32 bytes");
+  });
 });
 
 describe("HTTP foundation", () => {

@@ -1,11 +1,5 @@
 import { DatabaseInfrastructure } from "./database.infrastructure";
-
-const initialRoles = [
-  { key: "SUPER_ADMIN", name: "Super Admin" },
-  { key: "OPERATIONS_MANAGER", name: "Operations Manager" },
-  { key: "OPERATIONS_STAFF", name: "Operations Staff" },
-  { key: "VIEWER", name: "Viewer" },
-] as const;
+import { initialRoles } from "../auth/permissions";
 
 export async function seedCoreRoles(
   database: DatabaseInfrastructure,
@@ -16,8 +10,9 @@ export async function seedCoreRoles(
     await roles.updateOne(
       { key: role.key },
       {
+        $set: { name: role.name, permissions: [...role.permissions] },
         $setOnInsert: {
-          ...role,
+          key: role.key,
           version: 1,
           createdAt: new Date(),
           updatedAt: new Date(),
