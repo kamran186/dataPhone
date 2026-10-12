@@ -42,6 +42,14 @@ The [purchase and disconnect report](docs/implementation/phase-8-report.md) desc
 
 The [port report](docs/implementation/phase-9-report.md) covers encrypted drafts and documents, mock order tracking, FOC, completion, and audit history. The [dashboard and reporting report](docs/implementation/phase-10-report.md) covers metrics and CSV/Excel exports. To exercise mock operations locally, set `DATAPHONE_ENABLE_MOCK_CARRIER=true` and configure a mock carrier account; production mode never enables the mock. Supply `DATAPHONE_PORT_ENCRYPTION_KEY` before creating a port draft.
 
+### Development sample data
+
+`docker compose up --build` now loads sample data on every API startup. The seed is repeatable: it creates one account for each role, three customers, a local mock carrier account, phone numbers and assignments, orders, ports with an encrypted sample document, completed and failed jobs, sync runs, and reconciliation issues. Existing demo records are retained on restart. It never overwrites a non-demo account with the same email or a non-demo record with the same customer ID or phone number.
+
+Use `admin@email.com`, `operationsmanager@email.com`, `operationsstaff@email.com`, or `viewer@email.com` with the development password `Admin@123456`. These credentials are for local development only. To change the password before the first seed, set `DATAPHONE_DEMO_PASSWORD`; an existing demo account keeps its original password and startup reports a mismatch. Set `DATAPHONE_SEED_DEMO=false` to disable automatic seeding. Seeding is blocked when `NODE_ENV=production`.
+
+To run it manually against the configured development database after building the API, use `DATAPHONE_ENABLE_MOCK_CARRIER=true DATAPHONE_DEMO_PASSWORD='Admin@123456' pnpm --filter @dataphone/api db:seed-demo`. The manual command also needs `MONGO_URI` and `DATAPHONE_PORT_ENCRYPTION_KEY`. In Docker Compose, `docker compose exec api node apps/api/dist/database/demo-cli.js` uses the already configured environment.
+
 For deployment and daily use, see the [production guide](docs/deployment/production.md), [backup and restore](docs/deployment/backup-restore.md), [operator guide](docs/operators/guide.md), [API guide](docs/api.md), and [carrier extension guide](docs/carriers/adding-adapter.md).
 
 Quality checks: `pnpm typecheck`, `pnpm lint`, `pnpm format:check`, `pnpm test`, `pnpm --filter @dataphone/web test:e2e`, and `pnpm build`.

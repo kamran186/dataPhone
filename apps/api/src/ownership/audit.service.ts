@@ -56,6 +56,38 @@ function digest(event: Omit<AuditEvent, "_id" | "hash">): string {
     .digest("hex");
 }
 
+export async function appendAuditEvent(
+  db: Db,
+  session: ClientSession,
+  input: AuditInput,
+): Promise<AuditEvent> {
+  const heads = db.collection<ChainHead>("audit_chain_heads");
+  const head = await heads.findOne({ _id: "global" }, { session });
+  if (!head) throw new Error("Audit chain is not initialized");
+  const eventWithoutHash = {
+    sequence: head.sequence + 1,
+    previousHash: head.hash,
+    ...input,
+    createdAt: new Date(),
+  };
+  const event: AuditEvent = {
+    _id: new ObjectId(),
+    ...eventWithoutHash,
+    hash: digest(eventWithoutHash),
+  };
+  const advanced = await heads.updateOne(
+    { _id: "global", sequence: head.sequence },
+    { $set: { sequence: event.sequence, hash: event.hash } },
+    { session },
+  );
+  if (!advanced.matchedCount)
+    throw new Error("Audit chain changed during mutation");
+  await db
+    .collection<AuditEvent>("number_events")
+    .insertOne(event, { session });
+  return event;
+}
+
 @Injectable()
 export class AuditService {
   constructor(private readonly database: DatabaseService) {}
@@ -65,31 +97,7 @@ export class AuditService {
     session: ClientSession,
     input: AuditInput,
   ): Promise<AuditEvent> {
-    const heads = db.collection<ChainHead>("audit_chain_heads");
-    const head = await heads.findOne({ _id: "global" }, { session });
-    if (!head) throw new Error("Audit chain is not initialized");
-    const eventWithoutHash = {
-      sequence: head.sequence + 1,
-      previousHash: head.hash,
-      ...input,
-      createdAt: new Date(),
-    };
-    const event: AuditEvent = {
-      _id: new ObjectId(),
-      ...eventWithoutHash,
-      hash: digest(eventWithoutHash),
-    };
-    const advanced = await heads.updateOne(
-      { _id: "global", sequence: head.sequence },
-      { $set: { sequence: event.sequence, hash: event.hash } },
-      { session },
-    );
-    if (!advanced.matchedCount)
-      throw new Error("Audit chain changed during mutation");
-    await db
-      .collection<AuditEvent>("number_events")
-      .insertOne(event, { session });
-    return event;
+    return appendAuditEvent(db, session, input);
   }
 
   async verify(): Promise<{
