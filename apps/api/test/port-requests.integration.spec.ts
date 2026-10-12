@@ -322,6 +322,29 @@ integration("port request drafts", () => {
       expect(Buffer.from(await downloaded.arrayBuffer()).toString()).toBe(
         "%PDF-1.7 evidence",
       );
+      const largeContent = Buffer.concat([
+        Buffer.from("%PDF-1.7\n"),
+        Buffer.alloc(700_000, 0x20),
+      ]);
+      const largeDocument = await fetch(`${root}/ports/${port.id}/documents`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          filename: "large-evidence.pdf",
+          contentType: "application/pdf",
+          base64: largeContent.toString("base64"),
+        }),
+      });
+      expect(largeDocument.status).toBe(201);
+      const largeUploaded = (await largeDocument.json()) as { id: string };
+      const largeDownloaded = await fetch(
+        `${root}/ports/${port.id}/documents/${largeUploaded.id}`,
+        { headers },
+      );
+      expect(largeDownloaded.status).toBe(200);
+      expect(Buffer.from(await largeDownloaded.arrayBuffer())).toEqual(
+        largeContent,
+      );
     } finally {
       await app?.close();
       if (previousUri === undefined) delete process.env.MONGO_URI;

@@ -2,6 +2,7 @@ import "reflect-metadata";
 import { randomUUID } from "node:crypto";
 import { INestApplication, ValidationPipe } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
+import type { NestExpressApplication } from "@nestjs/platform-express";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import type { NextFunction, Request, Response } from "express";
 import { AppModule } from "./app.module";
@@ -10,10 +11,14 @@ import { loadConfig } from "./config/app-config";
 
 export async function createApp(): Promise<INestApplication> {
   const config = loadConfig(process.env);
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     logger: ["error", "warn"],
+    bodyParser: false,
   });
   app.setGlobalPrefix("api/v1");
+  // A 5 MiB document expands to almost 7 MiB when sent as base64 JSON.
+  app.useBodyParser("json", { limit: "7mb" });
+  app.useBodyParser("urlencoded", { extended: true, limit: "100kb" });
   app.enableCors({ origin: config.corsOrigin, credentials: true });
   app.enableShutdownHooks();
   app.use(

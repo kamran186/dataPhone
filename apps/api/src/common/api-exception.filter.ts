@@ -15,10 +15,16 @@ export class ApiExceptionFilter implements ExceptionFilter {
     const request = host
       .switchToHttp()
       .getRequest<Request & { correlationId?: string }>();
+    const tooLarge =
+      error instanceof Error &&
+      "status" in error &&
+      error.status === HttpStatus.PAYLOAD_TOO_LARGE;
     const statusCode =
       error instanceof HttpException
         ? error.getStatus()
-        : HttpStatus.INTERNAL_SERVER_ERROR;
+        : tooLarge
+          ? HttpStatus.PAYLOAD_TOO_LARGE
+          : HttpStatus.INTERNAL_SERVER_ERROR;
     const raw =
       error instanceof HttpException ? error.getResponse() : undefined;
     const message =
@@ -29,9 +35,11 @@ export class ApiExceptionFilter implements ExceptionFilter {
             "message" in raw &&
             typeof raw.message === "string"
           ? raw.message
-          : error instanceof HttpException
-            ? error.message
-            : "Internal server error";
+          : tooLarge
+            ? "Request body is too large"
+            : error instanceof HttpException
+              ? error.message
+              : "Internal server error";
     const body: ApiError = {
       statusCode,
       message,
