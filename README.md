@@ -22,13 +22,13 @@ The application has employee sign-in, permission-protected pages, background job
 ```sh
 pnpm install
 pnpm build
-MONGO_URI='mongodb://127.0.0.1:27017/dataphone?directConnection=true' pnpm --filter @dataphone/api start
+MONGO_URI='mongodb://127.0.0.1:27018/dataphone?directConnection=true' pnpm --filter @dataphone/api start
 pnpm --filter @dataphone/web dev
 ```
 
 The MongoDB server must run as a replica set for later transaction and change-stream features. See [deployment notes](docs/deployment/local.md). For a local container run, use `docker compose up --build -d` and open `http://localhost:8080`.
 
-An administrator must be initialized once before staff can sign in. See the [local deployment instructions](docs/deployment/local.md) for the bootstrap command and secret handling.
+When automatic demo seeding is disabled, initialize an administrator before staff can sign in. See the [local deployment instructions](docs/deployment/local.md) for the bootstrap command and secret handling.
 
 The carrier adapter registry and tested mock are described in [carrier integration requirements](docs/carriers/integration-requirements.md). The only enabled real carrier capability is read-only Bandwidth inventory; live access requires DataPhone account credentials.
 
@@ -49,6 +49,8 @@ The [port report](docs/implementation/phase-9-report.md) covers encrypted drafts
 Use `admin@email.com`, `operationsmanager@email.com`, `operationsstaff@email.com`, or `viewer@email.com` with the development password `Admin@123456`. These credentials are for local development only. To change the password before the first seed, set `DATAPHONE_DEMO_PASSWORD`; an existing demo account keeps its original password and startup reports a mismatch. Set `DATAPHONE_SEED_DEMO=false` to disable automatic seeding. Seeding is blocked when `NODE_ENV=production`.
 
 To run it manually against the configured development database after building the API, use `DATAPHONE_ENABLE_MOCK_CARRIER=true DATAPHONE_DEMO_PASSWORD='Admin@123456' pnpm --filter @dataphone/api db:seed-demo`. The manual command also needs `MONGO_URI` and `DATAPHONE_PORT_ENCRYPTION_KEY`. In Docker Compose, `docker compose exec api node apps/api/dist/database/demo-cli.js` uses the already configured environment.
+
+To inspect the Docker database in MongoDB Compass, connect to `mongodb://127.0.0.1:27018/dataphone?directConnection=true`, then open the `dataphone` database. The Docker MongoDB is bound to port 27018 on your Mac because a separate local MongoDB may already use port 27017. The Docker data persists in the `dataphone_mongo_data` volume.
 
 For deployment and daily use, see the [production guide](docs/deployment/production.md), [backup and restore](docs/deployment/backup-restore.md), [operator guide](docs/operators/guide.md), [API guide](docs/api.md), and [carrier extension guide](docs/carriers/adding-adapter.md).
 
