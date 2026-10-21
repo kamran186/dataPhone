@@ -322,7 +322,6 @@ export async function seedDemoData(
         nativeIds: ["demo-offer-1002"],
         jobId: jobIds[0],
         status: "pending",
-        nativeOrderId: "DEMO-ORDER-1002",
         items: [],
         unfulfilledCount: 1,
       },

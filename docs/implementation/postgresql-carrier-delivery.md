@@ -15,7 +15,7 @@ Verified on October 21, 2026. Delivery branch: `codex/scope1-review`, based on `
 | Check | Result |
 | --- | --- |
 | API suites against isolated PostgreSQL schemas | 17 suites, 95 tests passed; no skipped integration suites |
-| Browser component suites | 5 files, 19 tests passed |
+| Browser component suites | 5 files, 21 tests passed after browser acceptance fixes |
 | Chrome workflows | 2 passed |
 | Typecheck, lint, formatting, whitespace check | Passed |
 | Production API and web build | Passed; existing frontend bundle-size warning remains |
@@ -24,6 +24,8 @@ Verified on October 21, 2026. Delivery branch: `codex/scope1-review`, based on `
 | Packaged application HTTP smoke | Readiness, login/refresh, UUIDs, inventory, reports/CSV, customer/port lists, document download, viewer search, and viewer purchase rejection passed |
 | Running application audit verification | Valid chain, 7 events at verification |
 | Audit JSON round-trip regression | Ownership suite: 9 tests passed after adding a date-bearing event |
+| Packaged browser acceptance | Login, ownership, mock purchase/disconnect/ports, documents, synchronization, reports/exports, and viewer restrictions passed; see `browser-acceptance.md` |
+| Audit verification after browser acceptance | Valid chain, 38 events |
 
 The running development application contained 17 numbers, three customers, four port records, and an encrypted sample document during the smoke test. One sample port completed through the real application worker against the local simulated carrier; this is not live carrier acceptance.
 

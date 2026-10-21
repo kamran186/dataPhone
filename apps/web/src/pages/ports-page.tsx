@@ -208,6 +208,12 @@ export function PortsPage() {
               <TextField
                 key={key}
                 label={label}
+                name={`port-${key}`}
+                autoComplete={
+                  key === "accountNumber" || key === "pin"
+                    ? "new-password"
+                    : "off"
+                }
                 value={form[key]}
                 onChange={(event) => set(key, event.target.value)}
                 type={

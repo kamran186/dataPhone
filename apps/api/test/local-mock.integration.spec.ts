@@ -85,11 +85,14 @@ integration("explicit local mock carrier", () => {
       e164: offer.e164,
       carrierId,
       carrierAccountId: accountId,
-      carrierNumberId: offer.e164,
+      carrierNumberId: "seeded-carrier-number-id",
       status: "active",
     });
-    expect((await adapter.listInventory(account, {})).numbers[0].e164).toBe(
-      offer.e164,
+    expect((await adapter.listInventory(account, {})).numbers[0]).toMatchObject(
+      {
+        e164: offer.e164,
+        nativeId: "seeded-carrier-number-id",
+      },
     );
     const beforeNodeEnv = process.env.NODE_ENV;
     process.env.NODE_ENV = "production";

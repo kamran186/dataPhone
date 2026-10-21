@@ -72,6 +72,10 @@ export function PortDetailPage() {
     queryKey: ["port", id],
     enabled: Boolean(id),
     queryFn: () => getJson<Port>(`/api/v1/ports/${id}`),
+    refetchInterval: (query) =>
+      ["SUBMITTED", "DATE_CONFIRMED"].includes(query.state.data?.status ?? "")
+        ? 5000
+        : false,
   });
   const documents = useQuery({
     queryKey: ["port-documents", id],
@@ -215,8 +219,12 @@ export function PortDetailPage() {
               {port.data.focDate && (
                 <Alert severity="info">
                   Date confirmed:{" "}
-                  {new Date(port.data.focDate).toLocaleDateString()}. Port is
-                  still in progress.
+                  {new Date(port.data.focDate).toLocaleDateString(undefined, {
+                    timeZone: "UTC",
+                  })}
+                  .
+                  {port.data.status === "DATE_CONFIRMED" &&
+                    " Port is still in progress."}
                 </Alert>
               )}
               {port.data.rejectionReason && (
@@ -278,6 +286,12 @@ export function PortDetailPage() {
                   <TextField
                     key={key}
                     label={title}
+                    name={`port-correction-${key}`}
+                    autoComplete={
+                      key === "pin" || key === "accountNumber"
+                        ? "new-password"
+                        : "off"
+                    }
                     value={correction[key]}
                     type={
                       key === "pin" || key === "accountNumber"

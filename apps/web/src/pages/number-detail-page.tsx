@@ -139,9 +139,15 @@ export function NumberDetailPage() {
   const active = detail.data?.assignments.find(
     (assignment) => assignment.active,
   );
-  const activeName = customers.data?.items.find(
-    (customer) => customer.id === active?.customerId,
-  )?.name;
+  const activeCustomer = useQuery({
+    queryKey: ["customer", active?.customerId],
+    enabled: Boolean(
+      active?.customerId && user?.permissions.includes("customers.view"),
+    ),
+    queryFn: () =>
+      getJson<CustomerRow>(`/api/v1/customers/${active!.customerId}`),
+  });
+  const activeName = activeCustomer.data?.name;
 
   async function submit() {
     if (!dialog) return;

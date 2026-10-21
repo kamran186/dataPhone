@@ -56,7 +56,7 @@ export class LocalMockAdapter extends MockCarrierAdapter {
       throw new Error("Invalid mock inventory page");
     const collection = this.database
       .sql()
-      .table<{ e164: string }>("phone_numbers");
+      .table<{ e164: string; carrierNumberId: string }>("phone_numbers");
     const filter = {
       carrierAccountId: uuid(account.id),
       status: "active",
@@ -73,7 +73,7 @@ export class LocalMockAdapter extends MockCarrierAdapter {
     return {
       numbers: rows.map((row) => ({
         e164: row.e164,
-        nativeId: row.e164,
+        nativeId: row.carrierNumberId,
         status: "active",
       })),
       totalCount,

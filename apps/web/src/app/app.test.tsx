@@ -102,6 +102,61 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it("shows the assigned customer name to a viewer without assignment access", async () => {
+  useAuthStore.setState({
+    status: "authenticated",
+    accessToken: "viewer-token",
+    user: {
+      ...user,
+      roleKeys: ["VIEWER"],
+      permissions: ["inventory.view", "customers.view"],
+    },
+  });
+  window.history.replaceState({}, "", "/inventory/viewer-number");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.endsWith("/numbers/viewer-number"))
+        return {
+          ok: true,
+          json: async () => ({
+            e164: "+12125550921",
+            status: "active",
+            carrier: "mock",
+            carrierAccount: "sandbox",
+            firstSeenAt: "2026-10-21T13:00:00Z",
+            lastSeenAt: "2026-10-21T13:00:00Z",
+            holdings: [],
+            assignments: [{ customerId: "assigned-customer", active: true }],
+          }),
+        };
+      if (path.endsWith("/customers/assigned-customer"))
+        return {
+          ok: true,
+          json: async () => ({
+            id: "assigned-customer",
+            name: "Viewer Customer",
+            status: "active",
+          }),
+        };
+      if (path.endsWith("/system/info"))
+        return { ok: true, json: async () => ({ name: "DataPhone" }) };
+      return { ok: false, status: 404 };
+    }),
+  );
+  render(<App />);
+  expect(
+    await screen.findByText("Current customer: Viewer Customer"),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: /transfer number/i }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: /unassign number/i }),
+  ).not.toBeInTheDocument();
+});
+
 it("requires sign-in and then shows the protected overview", async () => {
   render(<App />);
   expect(
@@ -548,6 +603,24 @@ it("transfers and then unassigns an owned number", async () => {
         current = null;
         return { ok: true, status: 201, json: async () => ({}) };
       }
+      if (path.endsWith(`/customers/${firstCustomer}`))
+        return {
+          ok: true,
+          json: async () => ({
+            id: firstCustomer,
+            name: "First Customer",
+            status: "active",
+          }),
+        };
+      if (path.endsWith(`/customers/${secondCustomer}`))
+        return {
+          ok: true,
+          json: async () => ({
+            id: secondCustomer,
+            name: "Second Customer",
+            status: "active",
+          }),
+        };
       const data = path.includes("/customers?")
         ? {
             items: [

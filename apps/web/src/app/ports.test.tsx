@@ -115,40 +115,48 @@ it("creates a redacted port draft through the browser wizard", async () => {
   expect(screen.queryByText("sensitive-123")).not.toBeInTheDocument();
 });
 
-it("shows a confirmed FOC date without claiming the port is complete", async () => {
-  window.history.replaceState({}, "", `/ports/${portId}`);
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (input: RequestInfo | URL) => {
-      const path = String(input);
-      const data = path.endsWith(`/ports/${portId}`)
-        ? {
-            id: portId,
-            status: "DATE_CONFIRMED",
-            numbers: ["+18043024183"],
-            focDate: "2026-11-12T00:00:00.000Z",
-            currentProvider: "Old Carrier",
-            accountName: "Acme West",
-            history: [
-              {
-                id: "event-1",
-                type: "port.date_confirmed",
-                createdAt: "2026-10-11T00:00:00Z",
-              },
-            ],
-          }
-        : path.endsWith(`/ports/${portId}/documents`)
-          ? []
-          : { name: "DataPhone" };
-      return { ok: true, json: async () => data };
-    }),
-  );
-  render(<App />);
-  expect(
-    await screen.findByRole("heading", { name: "Port request" }),
-  ).toBeInTheDocument();
-  expect(
-    await screen.findByText(/Port is still in progress/),
-  ).toBeInTheDocument();
-  expect(screen.getAllByText(/Date confirmed/).length).toBeGreaterThan(0);
-});
+it.each([
+  ["DATE_CONFIRMED", true],
+  ["COMPLETED", false],
+])(
+  "describes FOC progress correctly for a %s port",
+  async (status, inProgress) => {
+    window.history.replaceState({}, "", `/ports/${portId}`);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input);
+        const data = path.endsWith(`/ports/${portId}`)
+          ? {
+              id: portId,
+              status,
+              numbers: ["+18043024183"],
+              focDate: "2026-11-12T00:00:00.000Z",
+              currentProvider: "Old Carrier",
+              accountName: "Acme West",
+              history: [
+                {
+                  id: "event-1",
+                  type: "port.date_confirmed",
+                  createdAt: "2026-10-11T00:00:00Z",
+                },
+              ],
+            }
+          : path.endsWith(`/ports/${portId}/documents`)
+            ? []
+            : { name: "DataPhone" };
+        return { ok: true, json: async () => data };
+      }),
+    );
+    render(<App />);
+    expect(
+      await screen.findByRole("heading", { name: "Port request" }),
+    ).toBeInTheDocument();
+    await screen.findByText(/11\/12\/2026/);
+    expect(Boolean(screen.queryByText(/Port is still in progress/))).toBe(
+      inProgress,
+    );
+    expect(screen.getAllByText(/Date confirmed/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/11\/12\/2026/)).toBeInTheDocument();
+  },
+);
