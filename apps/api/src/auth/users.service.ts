@@ -4,21 +4,25 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { ClientSession, Collection, ObjectId } from "mongodb";
+import { Id, SqlSession, Table, uuid } from "../database/query";
 import { DatabaseService } from "../database/database.service";
 import { initialRoles } from "./permissions";
 import { hashPassword } from "./password";
 import { UserDocument } from "./auth.service";
 
-function parseId(id: string): ObjectId {
-  if (!/^[a-f0-9]{24}$/.test(id))
+function parseId(id: string): Id {
+  if (
+    !/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(
+      id,
+    )
+  )
     throw new BadRequestException("Invalid user ID");
-  return new ObjectId(id);
+  return uuid(id);
 }
 
 function toPublic(user: UserDocument) {
   return {
-    id: user._id.toHexString(),
+    id: user.id,
     email: user.email,
     displayName: user.displayName,
     roleKeys: user.roleKeys,
@@ -33,16 +37,16 @@ export class UsersService {
   constructor(private readonly database: DatabaseService) {}
 
   private users() {
-    return this.database.nativeDb().collection<UserDocument>("users");
+    return this.database.sql().table<UserDocument>("users");
   }
 
   private userRepository() {
-    return this.database.repository<UserDocument>("User");
+    return this.users();
   }
 
   async list() {
     await this.database.ensureReady();
-    return (await this.userRepository().find())
+    return (await this.userRepository().find().toArray())
       .sort(
         (left, right) => left.createdAt.getTime() - right.createdAt.getTime(),
       )
@@ -60,7 +64,7 @@ export class UsersService {
     const emailNormalized = email.trim().toLowerCase();
     const now = new Date();
     const user: UserDocument = {
-      _id: new ObjectId(),
+      id: uuid(),
       email: emailNormalized,
       emailNormalized,
       displayName: displayName?.trim() || emailNormalized.split("@")[0],
@@ -73,13 +77,13 @@ export class UsersService {
       updatedAt: now,
     };
     try {
-      await this.userRepository().save(user);
+      await this.users().insertOne(user);
     } catch (error) {
       if (
         error &&
         typeof error === "object" &&
         "code" in error &&
-        error.code === 11000
+        error.code === "23505"
       )
         throw new ConflictException("Email is already in use");
       throw error;
@@ -94,8 +98,8 @@ export class UsersService {
     await this.database.ensureReady();
     if (Object.values(changes).every((value) => value === undefined))
       throw new BadRequestException("No changes supplied");
-    const objectId = parseId(id);
-    const before = await this.users().findOne({ _id: objectId });
+    const recordId = parseId(id);
+    const before = await this.users().findOne({ id: recordId });
     if (!before) throw new NotFoundException("User not found");
     const removingAdmin =
       changes.active === false &&
@@ -112,24 +116,21 @@ export class UsersService {
       fields.displayName = changes.displayName.trim();
     let result: UserDocument | null;
     try {
-      const mutation = (
-        users: Collection<UserDocument>,
-        session?: ClientSession,
-      ) =>
+      const mutation = (users: Table<UserDocument>, session?: SqlSession) =>
         users.findOneAndUpdate(
-          { _id: objectId },
+          { id: recordId },
           { $set: fields, $inc: { version: 1, tokenVersion: 1 } },
           { returnDocument: "after", session },
         );
       result = removingAdmin
-        ? await this.withLastAdminGuard(objectId, mutation)
+        ? await this.withLastAdminGuard(recordId, mutation)
         : await mutation(this.users());
     } catch (error) {
       if (
         error &&
         typeof error === "object" &&
         "code" in error &&
-        error.code === 11000
+        error.code === "23505"
       )
         throw new ConflictException("Email is already in use");
       throw error;
@@ -141,19 +142,16 @@ export class UsersService {
   async assignRoles(id: string, roleKeys: string[]) {
     await this.database.ensureReady();
     this.validateRoles(roleKeys);
-    const objectId = parseId(id);
-    const before = await this.users().findOne({ _id: objectId });
+    const recordId = parseId(id);
+    const before = await this.users().findOne({ id: recordId });
     if (!before) throw new NotFoundException("User not found");
     const removingAdmin =
       before.active &&
       before.roleKeys.includes("SUPER_ADMIN") &&
       !roleKeys.includes("SUPER_ADMIN");
-    const mutation = (
-      users: Collection<UserDocument>,
-      session?: ClientSession,
-    ) =>
+    const mutation = (users: Table<UserDocument>, session?: SqlSession) =>
       users.findOneAndUpdate(
-        { _id: objectId },
+        { id: recordId },
         {
           $set: { roleKeys: [...new Set(roleKeys)], updatedAt: new Date() },
           $inc: { version: 1, tokenVersion: 1 },
@@ -161,7 +159,7 @@ export class UsersService {
         { returnDocument: "after", session },
       );
     const result = removingAdmin
-      ? await this.withLastAdminGuard(objectId, mutation)
+      ? await this.withLastAdminGuard(recordId, mutation)
       : await mutation(this.users());
     if (!result) throw new NotFoundException("User not found");
     return toPublic(result);
@@ -177,24 +175,21 @@ export class UsersService {
   }
 
   private async withLastAdminGuard<T>(
-    id: ObjectId,
-    mutation: (
-      users: Collection<UserDocument>,
-      session: ClientSession,
-    ) => Promise<T>,
+    id: Id,
+    mutation: (users: Table<UserDocument>, session: SqlSession) => Promise<T>,
   ): Promise<T> {
     return this.database.withTransaction(async (db, session) => {
       await db
-        .collection("auth_admin_guard")
+        .table("auth_admin_guard")
         .updateOne(
-          { _id: "last-admin" as never },
+          { id: "last-admin" as never },
           { $inc: { revision: 1 } },
           { session },
         );
-      const users = db.collection<UserDocument>("users");
-      const current = await users.findOne({ _id: id }, { session });
+      const users = db.table<UserDocument>("users");
+      const current = await users.findOne({ id: id }, { session });
       if (!current) throw new NotFoundException("User not found");
-      const count = await users.countDocuments(
+      const count = await users.count(
         { active: true, roleKeys: "SUPER_ADMIN" },
         { session },
       );

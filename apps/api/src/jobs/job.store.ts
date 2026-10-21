@@ -1,7 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
 import { ConflictException, Injectable } from "@nestjs/common";
-import { MongoServerError, ObjectId } from "mongodb";
-import type { ClientSession, Db } from "mongodb";
+import {
+  DatabaseError,
+  Id,
+  SqlDatabase,
+  SqlSession,
+  uuid,
+} from "../database/query";
+
 import { DatabaseService } from "../database/database.service";
 import type {
   BackgroundJob,
@@ -41,13 +47,11 @@ export class JobStore {
   constructor(private readonly database: DatabaseService) {}
 
   private jobs() {
-    return this.database
-      .nativeDb()
-      .collection<BackgroundJob>("background_jobs");
+    return this.database.sql().table<BackgroundJob>("background_jobs");
   }
 
   private events() {
-    return this.database.nativeDb().collection<JobEvent>("job_events");
+    return this.database.sql().table<JobEvent>("job_events");
   }
 
   private prepare(input: CreateJobInput): BackgroundJob {
@@ -63,7 +67,7 @@ export class JobStore {
       throw new Error("Invalid maximum attempts");
     const now = new Date();
     return {
-      _id: new ObjectId(),
+      id: uuid(),
       type: input.type,
       payload: input.payload,
       fingerprint: fingerprint(input.type, input.payload),
@@ -80,17 +84,17 @@ export class JobStore {
   }
 
   private async insertInTransaction(
-    db: Db,
-    session: ClientSession,
+    db: SqlDatabase,
+    session: SqlSession,
     job: BackgroundJob,
   ): Promise<void> {
     await db
-      .collection<BackgroundJob>("background_jobs")
+      .table<BackgroundJob>("background_jobs")
       .insertOne(job, { session });
-    await db.collection<JobEvent>("job_events").insertOne(
+    await db.table<JobEvent>("job_events").insertOne(
       {
-        _id: new ObjectId(),
-        jobId: job._id,
+        id: uuid(),
+        jobId: job.id,
         sequence: 1,
         type: "queued",
         createdAt: job.createdAt,
@@ -100,8 +104,8 @@ export class JobStore {
   }
 
   async createInTransaction(
-    db: Db,
-    session: ClientSession,
+    db: SqlDatabase,
+    session: SqlSession,
     input: CreateJobInput,
   ): Promise<BackgroundJob> {
     const job = this.prepare(input);
@@ -119,8 +123,8 @@ export class JobStore {
       return job;
     } catch (error) {
       if (
-        !(error instanceof MongoServerError) ||
-        error.code !== 11000 ||
+        !(error instanceof DatabaseError) ||
+        error.code !== "23505" ||
         !input.idempotencyKey
       )
         throw error;
@@ -158,10 +162,10 @@ export class JobStore {
         },
         $inc: { attempts: 1 },
       },
-      { sort: { runAt: 1, _id: 1 }, returnDocument: "after" },
+      { sort: { runAt: 1, id: 1 }, returnDocument: "after", skipLocked: true },
     );
     if (job)
-      await this.appendEvent(job._id, "started", undefined, undefined, now);
+      await this.appendEvent(job.id, "started", undefined, undefined, now);
     return job;
   }
 
@@ -169,7 +173,7 @@ export class JobStore {
     const now = new Date();
     const result = await this.jobs().updateOne(
       {
-        _id: job._id,
+        id: job.id,
         status: "running",
         leaseToken: job.leaseToken,
         leaseUntil: { $gt: now },
@@ -191,10 +195,10 @@ export class JobStore {
     const now = new Date();
     return this.database.withTransaction(async (db, session) => {
       const updated = await db
-        .collection<BackgroundJob>("background_jobs")
+        .table<BackgroundJob>("background_jobs")
         .findOneAndUpdate(
           {
-            _id: job._id,
+            id: job.id,
             status: "running",
             leaseToken: job.leaseToken,
             leaseUntil: { $gt: now },
@@ -204,10 +208,10 @@ export class JobStore {
           { session, returnDocument: "after" },
         );
       if (!updated) return false;
-      await db.collection<JobEvent>("job_events").insertOne(
+      await db.table<JobEvent>("job_events").insertOne(
         {
-          _id: new ObjectId(),
-          jobId: job._id,
+          id: uuid(),
+          jobId: job.id,
           sequence: updated.eventSequence,
           type: "progress",
           progress,
@@ -288,10 +292,10 @@ export class JobStore {
   ): Promise<boolean> {
     return this.database.withTransaction(async (db, session) => {
       const updated = await db
-        .collection<BackgroundJob>("background_jobs")
+        .table<BackgroundJob>("background_jobs")
         .findOneAndUpdate(
           {
-            _id: job._id,
+            id: job.id,
             status: "running",
             leaseToken: job.leaseToken,
             leaseUntil: { $gt: now },
@@ -300,10 +304,10 @@ export class JobStore {
           { session, returnDocument: "after" },
         );
       if (!updated) return false;
-      await db.collection<JobEvent>("job_events").insertOne(
+      await db.table<JobEvent>("job_events").insertOne(
         {
-          _id: new ObjectId(),
-          jobId: job._id,
+          id: uuid(),
+          jobId: job.id,
           sequence: updated.eventSequence,
           type: eventType,
           createdAt: now,
@@ -315,7 +319,7 @@ export class JobStore {
   }
 
   async appendEvent(
-    jobId: ObjectId,
+    jobId: Id,
     type: JobEventType,
     message?: string,
     progress?: number,
@@ -323,16 +327,16 @@ export class JobStore {
   ): Promise<void> {
     await this.database.withTransaction(async (db, session) => {
       const updated = await db
-        .collection<BackgroundJob>("background_jobs")
+        .table<BackgroundJob>("background_jobs")
         .findOneAndUpdate(
-          { _id: jobId },
+          { id: jobId },
           { $inc: { eventSequence: 1 } },
           { session, returnDocument: "after" },
         );
       if (!updated) return;
-      await db.collection<JobEvent>("job_events").insertOne(
+      await db.table<JobEvent>("job_events").insertOne(
         {
-          _id: new ObjectId(),
+          id: uuid(),
           jobId,
           sequence: updated.eventSequence,
           type,
@@ -345,22 +349,22 @@ export class JobStore {
     });
   }
 
-  async get(id: ObjectId): Promise<BackgroundJob | null> {
+  async get(id: Id): Promise<BackgroundJob | null> {
     await this.database.ensureReady();
-    return this.jobs().findOne({ _id: id });
+    return this.jobs().findOne({ id: id });
   }
 
   async list(limit = 50): Promise<BackgroundJob[]> {
     await this.database.ensureReady();
     return this.jobs()
       .find()
-      .sort({ createdAt: -1, _id: -1 })
+      .sort({ createdAt: -1, id: -1 })
       .limit(limit)
       .toArray();
   }
 
   async listEvents(
-    jobId: ObjectId,
+    jobId: Id,
     after?: number,
     limit = 100,
   ): Promise<JobEvent[]> {

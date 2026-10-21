@@ -61,7 +61,7 @@ function price(cents?: number, currency = "USD") {
   );
 }
 
-export function PurchasesPage() {
+export function PurchasesPage({ readOnly = false }: { readOnly?: boolean }) {
   const queryClient = useQueryClient();
   const [areaCode, setAreaCode] = useState("");
   const [city, setCity] = useState("");
@@ -83,15 +83,22 @@ export function PurchasesPage() {
       getJson<{
         offers: Offer[];
         errors: Array<{ carrier: string; code: string }>;
+        outcomes?: Array<{
+          carrier: string;
+          carrierAccountId: string;
+          status: string;
+        }>;
       }>(`/api/v1/purchases/search?${submitted}`),
   });
   const customers = useQuery({
     queryKey: ["purchase-customers"],
+    enabled: !readOnly,
     queryFn: () =>
       getJson<{ items: Customer[] }>("/api/v1/customers?page=1&pageSize=100"),
   });
   const orders = useQuery({
     queryKey: ["purchase-orders"],
+    enabled: !readOnly,
     queryFn: () => getJson<{ items: Order[] }>("/api/v1/purchases"),
   });
   const currentOrder = useQuery({
@@ -198,13 +205,19 @@ export function PurchasesPage() {
   return (
     <Stack spacing={3}>
       <PageHeader
-        title="Number purchases"
-        description="Compare available numbers and track purchase orders."
+        title={readOnly ? "Available numbers" : "Number purchases"}
+        description={
+          readOnly
+            ? "Search carrier availability using the filters each carrier supports."
+            : "Compare available numbers and track purchase orders."
+        }
       />
-      <Alert severity="info">
-        Purchase orders are available only for the mock carrier. Live billable
-        purchases require separate authorization.
-      </Alert>
+      {!readOnly && (
+        <Alert severity="info">
+          Purchase orders are available only for the mock carrier. Live billable
+          purchases require separate authorization.
+        </Alert>
+      )}
       <Paper sx={{ p: 2 }}>
         <Stack spacing={2}>
           <Typography variant="h6">Search available numbers</Typography>
@@ -262,9 +275,24 @@ export function PurchasesPage() {
       )}
       {search.data?.errors.map((item) => (
         <Alert key={`${item.carrier}:${item.code}`} severity="warning">
-          {item.carrier}: {item.code}
+          {item.carrier}:{" "}
+          {item.code === "unsupported"
+            ? "These search filters are not supported by this carrier."
+            : item.code}
         </Alert>
       ))}
+      {search.data?.outcomes
+        ?.filter((item) => item.status === "partial")
+        .map((item) => (
+          <Alert key={item.carrierAccountId} severity="info">
+            {item.carrier}: showing a limited search across available exchanges.
+          </Alert>
+        ))}
+      {search.data?.outcomes?.length === 0 && (
+        <Alert severity="info">
+          No carrier accounts are configured for search.
+        </Alert>
+      )}
       {search.data && offers.length === 0 && (
         <Alert severity="info">No numbers matched this search.</Alert>
       )}
@@ -273,7 +301,7 @@ export function PurchasesPage() {
           <Table>
             <TableHead>
               <TableRow>
-                <TableCell>Select</TableCell>
+                {!readOnly && <TableCell>Select</TableCell>}
                 <TableCell>Number</TableCell>
                 <TableCell>Carrier</TableCell>
                 <TableCell>Location</TableCell>
@@ -284,15 +312,17 @@ export function PurchasesPage() {
             <TableBody>
               {offers.map((offer) => (
                 <TableRow key={offerKey(offer)}>
-                  <TableCell>
-                    <Checkbox
-                      checked={selected.includes(offerKey(offer))}
-                      onChange={() => toggle(offer)}
-                      slotProps={{
-                        input: { "aria-label": `Select ${offer.e164}` },
-                      }}
-                    />
-                  </TableCell>
+                  {!readOnly && (
+                    <TableCell>
+                      <Checkbox
+                        checked={selected.includes(offerKey(offer))}
+                        onChange={() => toggle(offer)}
+                        slotProps={{
+                          input: { "aria-label": `Select ${offer.e164}` },
+                        }}
+                      />
+                    </TableCell>
+                  )}
                   <TableCell>{offer.e164}</TableCell>
                   <TableCell>{offer.carrierName}</TableCell>
                   <TableCell>
@@ -312,7 +342,7 @@ export function PurchasesPage() {
           </Table>
         </Paper>
       )}
-      {chosen.length > 0 && (
+      {!readOnly && chosen.length > 0 && (
         <Paper sx={{ p: 2 }}>
           <Stack spacing={2}>
             <Typography variant="h6">
@@ -364,7 +394,7 @@ export function PurchasesPage() {
           </Stack>
         </Paper>
       )}
-      <Typography variant="h6">Recent orders</Typography>
+      {!readOnly && <Typography variant="h6">Recent orders</Typography>}
       {orders.isError && (
         <Alert severity="error">Unable to load purchase orders.</Alert>
       )}

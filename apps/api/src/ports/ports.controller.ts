@@ -10,11 +10,11 @@ import {
   Req,
   Res,
 } from "@nestjs/common";
-import { ObjectId } from "mongodb";
+import { Id, uuid } from "../database/query";
 import type { Response } from "express";
 import { RequirePermissions } from "../auth/auth.decorators";
 import type { AuthRequest } from "../auth/auth.guard";
-import { objectId } from "../ownership/ownership.http";
+import { recordId } from "../ownership/ownership.http";
 import { PortDocuments } from "./port.documents";
 import { PortOperations } from "./port.operations";
 import { PortRequests, PortStatus, ServiceAddress } from "./port.requests";
@@ -30,8 +30,8 @@ type DraftBody = {
   serviceAddress: ServiceAddress;
 };
 
-function actor(request: AuthRequest): ObjectId {
-  return new ObjectId(request.authUser!.id);
+function actor(request: AuthRequest): Id {
+  return uuid(request.authUser!.id);
 }
 function decodeDocument(encoded: string): Buffer {
   if (
@@ -58,7 +58,7 @@ export class PortsController {
   @Post("check-portability")
   check(@Body() body: { carrierAccountId: string; e164: string }) {
     return this.ports.checkPortability(
-      objectId(body.carrierAccountId),
+      recordId(body.carrierAccountId),
       body.e164,
     );
   }
@@ -68,8 +68,8 @@ export class PortsController {
     return this.ports.create(
       {
         ...body,
-        customerId: objectId(body.customerId),
-        carrierAccountId: objectId(body.carrierAccountId),
+        customerId: recordId(body.customerId),
+        carrierAccountId: recordId(body.carrierAccountId),
       },
       actor(request),
     );
@@ -96,7 +96,7 @@ export class PortsController {
 
   @Get(":id")
   get(@Param("id") id: string) {
-    return this.ports.get(objectId(id));
+    return this.ports.get(recordId(id));
   }
 
   @Patch(":id")
@@ -105,22 +105,22 @@ export class PortsController {
     @Body() body: Record<string, unknown>,
     @Req() request: AuthRequest,
   ) {
-    return this.ports.correct(objectId(id), body, actor(request));
+    return this.ports.correct(recordId(id), body, actor(request));
   }
 
   @Post(":id/cancel")
   cancel(@Param("id") id: string, @Req() request: AuthRequest) {
-    return this.ports.cancel(objectId(id), actor(request));
+    return this.ports.cancel(recordId(id), actor(request));
   }
 
   @Post(":id/submit")
   submit(@Param("id") id: string, @Req() request: AuthRequest) {
-    return this.operations.submit(objectId(id), actor(request));
+    return this.operations.submit(recordId(id), actor(request));
   }
 
   @Post(":id/resubmit")
   resubmit(@Param("id") id: string, @Req() request: AuthRequest) {
-    return this.operations.submit(objectId(id), actor(request), true);
+    return this.operations.submit(recordId(id), actor(request), true);
   }
 
   @Post(":id/documents")
@@ -130,7 +130,7 @@ export class PortsController {
     @Req() request: AuthRequest,
   ) {
     return this.documents.upload(
-      objectId(id),
+      recordId(id),
       body.filename,
       body.contentType,
       decodeDocument(body.base64),
@@ -140,7 +140,7 @@ export class PortsController {
 
   @Get(":id/documents")
   documentsForPort(@Param("id") id: string) {
-    return this.documents.list(objectId(id));
+    return this.documents.list(recordId(id));
   }
 
   @Get(":id/documents/:documentId")
@@ -150,8 +150,8 @@ export class PortsController {
     @Res() response: Response,
   ): Promise<void> {
     const document = await this.documents.download(
-      objectId(id),
-      objectId(documentId),
+      recordId(id),
+      recordId(documentId),
     );
     response.setHeader("Content-Type", document.contentType);
     response.setHeader(

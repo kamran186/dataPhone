@@ -1,7 +1,7 @@
 import { Controller, Get, Param, Query } from "@nestjs/common";
 import { RequirePermissions } from "../auth/auth.decorators";
 import { AuditService } from "./audit.service";
-import { objectId, pageQuery } from "./ownership.http";
+import { recordId, pageQuery } from "./ownership.http";
 
 function filter(raw: Record<string, string | undefined>) {
   return { type: raw.type, from: raw.from, to: raw.to, ...pageQuery(raw) };
@@ -17,7 +17,7 @@ export class HistoryController {
     @Param("id") raw: string,
     @Query() query: Record<string, string | undefined>,
   ) {
-    return this.audit.numberHistory(objectId(raw), filter(query));
+    return this.audit.numberHistory(recordId(raw), filter(query));
   }
 
   @Get("customers/:id/history")
@@ -25,6 +25,6 @@ export class HistoryController {
     @Param("id") raw: string,
     @Query() query: Record<string, string | undefined>,
   ) {
-    return this.audit.customerHistory(objectId(raw), filter(query));
+    return this.audit.customerHistory(recordId(raw), filter(query));
   }
 }

@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import { randomUUID } from "node:crypto";
-import { ObjectId } from "mongodb";
+import { Id, uuid } from "../src/database/query";
 import type { INestApplication } from "@nestjs/common";
 import { bootstrapAdministrator } from "../src/auth/bootstrap-admin";
 import { createApp } from "../src/bootstrap";
@@ -20,47 +20,52 @@ import { JobStore } from "../src/jobs/job.store";
 import { AuditService } from "../src/ownership/audit.service";
 import { AssignmentsService } from "../src/ownership/assignments.service";
 
-const baseUrl = process.env.DATAPHONE_TEST_MONGO_URL;
+const baseUrl = process.env.DATAPHONE_TEST_DATABASE_URL;
 const integration = baseUrl ? describe : describe.skip;
 
 integration("purchase and disconnect workflows", () => {
   let database: DatabaseService;
-  let mockAccountId: ObjectId;
-  let bandwidthAccountId: ObjectId;
+  let mockAccountId: Id;
+  let bandwidthAccountId: Id;
   let testUri: string;
 
   beforeAll(async () => {
-    const url = new URL(baseUrl ?? "mongodb://127.0.0.1:27017/");
-    url.pathname = `/dataphone_phase8_test_${randomUUID().replaceAll("-", "")}`;
+    const url = new URL(
+      baseUrl ?? "postgresql://dataphone:dataphone@127.0.0.1:54329/dataphone",
+    );
+    url.searchParams.set(
+      "schema",
+      `dataphone_phase8_test_${randomUUID().replaceAll("-", "")}`,
+    );
     testUri = url.toString();
     database = new DatabaseService(
-      loadConfig({ MONGO_URI: testUri, NODE_ENV: "test" }),
+      loadConfig({ DATABASE_URL: testUri, NODE_ENV: "test" }),
     );
     await database.ensureReady();
-    const mockCarrierId = new ObjectId();
+    const mockCarrierId = uuid();
     const bandwidth = await database
-      .nativeDb()
-      .collection("carriers")
+      .sql()
+      .table("carriers")
       .findOne({ code: "bandwidth" });
-    mockAccountId = new ObjectId();
-    bandwidthAccountId = new ObjectId();
+    mockAccountId = uuid();
+    bandwidthAccountId = uuid();
     await database
-      .nativeDb()
-      .collection("carriers")
-      .insertOne({ _id: mockCarrierId, code: "mock", displayName: "Mock" });
+      .sql()
+      .table("carriers")
+      .insertOne({ id: mockCarrierId, code: "mock", displayName: "Mock" });
     await database
-      .nativeDb()
-      .collection("carrier_accounts")
+      .sql()
+      .table("carrier_accounts")
       .insertMany([
         {
-          _id: mockAccountId,
+          id: mockAccountId,
           carrierId: mockCarrierId,
           externalAccountId: "sandbox-a",
           status: "active",
         },
         {
-          _id: bandwidthAccountId,
-          carrierId: bandwidth!._id,
+          id: bandwidthAccountId,
+          carrierId: bandwidth!.id,
           externalAccountId: "sandbox-b",
           status: "active",
         },
@@ -68,16 +73,16 @@ integration("purchase and disconnect workflows", () => {
   });
 
   afterAll(async () => {
-    if (database?.isConnected()) await database.nativeDb().dropDatabase();
+    if (database?.isConnected()) await database.dropTestSchema();
     await database?.close();
   });
 
   beforeEach(async () => {
     await database
-      .nativeDb()
-      .collection("carrier_accounts")
-      .updateOne({ _id: mockAccountId }, { $set: { status: "active" } });
-    for (const name of [
+      .sql()
+      .table("carrier_accounts")
+      .updateOne({ id: mockAccountId }, { $set: { status: "active" } });
+    await database.resetTestTables([
       "purchase_orders",
       "disconnect_requests",
       "background_jobs",
@@ -88,13 +93,12 @@ integration("purchase and disconnect workflows", () => {
       "number_events",
       "reconciliation_issues",
       "customers",
-    ])
-      await database.nativeDb().collection(name).deleteMany({});
+    ]);
     await database
-      .nativeDb()
-      .collection("audit_chain_heads")
+      .sql()
+      .table("audit_chain_heads")
       .updateOne(
-        { _id: "global" as never },
+        { id: "global" as never },
         { $set: { sequence: 0, hash: "0".repeat(64) } },
       );
   });
@@ -143,7 +147,7 @@ integration("purchase and disconnect workflows", () => {
       {
         e164: "+18043024183",
         carrier: "mock",
-        carrierAccountId: mockAccountId.toHexString(),
+        carrierAccountId: mockAccountId,
         monthlyPriceCents: 125,
         setupPriceCents: 50,
         currency: "USD",
@@ -179,10 +183,10 @@ integration("purchase and disconnect workflows", () => {
       new AssignmentsService(database, audit),
       audit,
     );
-    const actorId = new ObjectId();
-    const customerId = new ObjectId();
-    await database.nativeDb().collection("customers").insertOne({
-      _id: customerId,
+    const actorId = uuid();
+    const customerId = uuid();
+    await database.sql().table("customers").insertOne({
+      id: customerId,
       externalId: "buyer",
       name: "Buyer",
       status: "active",
@@ -202,58 +206,51 @@ integration("purchase and disconnect workflows", () => {
     ).rejects.toThrow("Idempotency");
     expect(
       await database
-        .nativeDb()
-        .collection("background_jobs")
-        .countDocuments({ type: "purchase.execute" }),
+        .sql()
+        .table("background_jobs")
+        .count({ type: "purchase.execute" }),
     ).toBe(1);
-    expect(
-      await database.nativeDb().collection("phone_numbers").countDocuments(),
-    ).toBe(0);
-    const outcome = await orders.process(new ObjectId(first.id), {
+    expect(await database.sql().table("phone_numbers").count()).toBe(0);
+    const outcome = await orders.process(uuid(first.id), {
       signal: new AbortController().signal,
       reportProgress: async () => undefined,
     });
     expect(outcome.status).toBe("partial");
-    expect((await orders.get(new ObjectId(first.id))).items).toMatchObject([
+    expect((await orders.get(uuid(first.id))).items).toMatchObject([
       { e164: "+18043024183", status: "confirmed" },
     ]);
     expect(
       await database
-        .nativeDb()
-        .collection("phone_numbers")
-        .countDocuments({ e164: "+18043024183" }),
+        .sql()
+        .table("phone_numbers")
+        .count({ e164: "+18043024183" }),
     ).toBe(1);
     expect(
       await database
-        .nativeDb()
-        .collection("number_assignments")
-        .countDocuments({ customerId, active: true }),
+        .sql()
+        .table("number_assignments")
+        .count({ customerId, active: true }),
     ).toBe(1);
     expect(await audit.verify()).toMatchObject({ valid: true, count: 2 });
-    await orders.process(new ObjectId(first.id), {
+    await orders.process(uuid(first.id), {
       signal: new AbortController().signal,
       reportProgress: async () => undefined,
     });
     expect(purchaseCalls).toBe(1);
-    expect(
-      await database
-        .nativeDb()
-        .collection("number_assignments")
-        .countDocuments(),
-    ).toBe(1);
+    expect(await database.sql().table("number_assignments").count()).toBe(1);
     await database
-      .nativeDb()
-      .collection("customers")
-      .updateOne({ _id: customerId }, { $set: { status: "inactive" } });
+      .sql()
+      .table("customers")
+      .updateOne({ id: customerId }, { $set: { status: "inactive" } });
     await database
-      .nativeDb()
-      .collection("carrier_accounts")
-      .updateOne({ _id: mockAccountId }, { $set: { status: "inactive" } });
+      .sql()
+      .table("carrier_accounts")
+      .updateOne({ id: mockAccountId }, { $set: { status: "inactive" } });
     expect((await orders.create(input, actorId)).id).toBe(first.id);
     await database
-      .nativeDb()
-      .collection("carrier_accounts")
-      .updateOne({ _id: mockAccountId }, { $set: { status: "active" } });
+      .sql()
+      .table("carrier_accounts")
+      .updateOne({ id: mockAccountId }, { $set: { status: "active" } });
   });
 
   it("keeps a timed-out carrier purchase retryable without creating inventory", async () => {
@@ -281,9 +278,9 @@ integration("purchase and disconnect workflows", () => {
       new AssignmentsService(database, audit),
       audit,
     );
-    const customerId = new ObjectId();
-    await database.nativeDb().collection("customers").insertOne({
-      _id: customerId,
+    const customerId = uuid();
+    await database.sql().table("customers").insertOne({
+      id: customerId,
       externalId: "timeout-buyer",
       name: "Timeout Buyer",
       status: "active",
@@ -295,24 +292,17 @@ integration("purchase and disconnect workflows", () => {
         nativeIds: ["mock-1"],
         idempotencyKey: "purchase-timeout-001",
       },
-      new ObjectId(),
+      uuid(),
     );
     await expect(
-      orders.process(new ObjectId(order.id), {
+      orders.process(uuid(order.id), {
         signal: new AbortController().signal,
         reportProgress: async () => undefined,
       }),
     ).rejects.toThrow("Carrier timed out");
-    expect((await orders.get(new ObjectId(order.id))).status).toBe("retrying");
-    expect(
-      await database.nativeDb().collection("phone_numbers").countDocuments(),
-    ).toBe(0);
-    expect(
-      await database
-        .nativeDb()
-        .collection("number_assignments")
-        .countDocuments(),
-    ).toBe(0);
+    expect((await orders.get(uuid(order.id))).status).toBe("retrying");
+    expect(await database.sql().table("phone_numbers").count()).toBe(0);
+    expect(await database.sql().table("number_assignments").count()).toBe(0);
   });
 
   it("opens a reconciliation issue when a purchased number belongs to another account", async () => {
@@ -337,25 +327,25 @@ integration("purchase and disconnect workflows", () => {
       new AssignmentsService(database, audit),
       audit,
     );
-    const customerId = new ObjectId();
-    await database.nativeDb().collection("customers").insertOne({
-      _id: customerId,
+    const customerId = uuid();
+    await database.sql().table("customers").insertOne({
+      id: customerId,
       externalId: "conflict-buyer",
       name: "Conflict Buyer",
       status: "active",
       version: 1,
     });
     await database
-      .nativeDb()
-      .collection("phone_numbers")
+      .sql()
+      .table("phone_numbers")
       .insertOne({
-        _id: new ObjectId(),
+        id: uuid(),
         e164: "+18043024183",
         carrierAccountId: bandwidthAccountId,
         carrierId: (await database
-          .nativeDb()
-          .collection("carrier_accounts")
-          .findOne({ _id: bandwidthAccountId }))!.carrierId,
+          .sql()
+          .table("carrier_accounts")
+          .findOne({ id: bandwidthAccountId }))!.carrierId,
         status: "active",
       });
     const order = await orders.create(
@@ -365,31 +355,23 @@ integration("purchase and disconnect workflows", () => {
         nativeIds: ["mock-conflict"],
         idempotencyKey: "purchase-conflict-001",
       },
-      new ObjectId(),
+      uuid(),
     );
     expect(
       (
-        await orders.process(new ObjectId(order.id), {
+        await orders.process(uuid(order.id), {
           signal: new AbortController().signal,
           reportProgress: async () => undefined,
         })
       ).status,
     ).toBe("failed");
+    expect(await database.sql().table("number_assignments").count()).toBe(0);
     expect(
-      await database
-        .nativeDb()
-        .collection("number_assignments")
-        .countDocuments(),
-    ).toBe(0);
-    expect(
-      await database
-        .nativeDb()
-        .collection("reconciliation_issues")
-        .countDocuments({
-          e164: "+18043024183",
-          type: "purchase_conflict",
-          status: "open",
-        }),
+      await database.sql().table("reconciliation_issues").count({
+        e164: "+18043024183",
+        type: "purchase_conflict",
+        status: "open",
+      }),
     ).toBe(1);
   });
 
@@ -415,9 +397,9 @@ integration("purchase and disconnect workflows", () => {
       new AssignmentsService(database, audit),
       audit,
     );
-    const customerId = new ObjectId();
-    await database.nativeDb().collection("customers").insertOne({
-      _id: customerId,
+    const customerId = uuid();
+    await database.sql().table("customers").insertOne({
+      id: customerId,
       externalId: "failure-buyer",
       name: "Failure Buyer",
       status: "active",
@@ -429,19 +411,17 @@ integration("purchase and disconnect workflows", () => {
         nativeIds: ["mock-1"],
         idempotencyKey: "purchase-failure-001",
       },
-      new ObjectId(),
+      uuid(),
     );
-    const result = await orders.process(new ObjectId(order.id), {
+    const result = await orders.process(uuid(order.id), {
       signal: new AbortController().signal,
       reportProgress: async () => undefined,
     });
     expect(result.status).toBe("failed");
-    expect((await orders.get(new ObjectId(order.id))).errorCode).toBe(
+    expect((await orders.get(uuid(order.id))).errorCode).toBe(
       "CARRIER_ORDER_FAILED",
     );
-    expect(
-      await database.nativeDb().collection("phone_numbers").countDocuments(),
-    ).toBe(0);
+    expect(await database.sql().table("phone_numbers").count()).toBe(0);
   });
 
   it("tracks a pending carrier order until confirmation", async () => {
@@ -473,9 +453,9 @@ integration("purchase and disconnect workflows", () => {
       new AssignmentsService(database, audit),
       audit,
     );
-    const customerId = new ObjectId();
-    await database.nativeDb().collection("customers").insertOne({
-      _id: customerId,
+    const customerId = uuid();
+    await database.sql().table("customers").insertOne({
+      id: customerId,
       externalId: "pending-buyer",
       name: "Pending Buyer",
       status: "active",
@@ -487,38 +467,36 @@ integration("purchase and disconnect workflows", () => {
         nativeIds: ["mock-1"],
         idempotencyKey: "purchase-pending-001",
       },
-      new ObjectId(),
+      uuid(),
     );
     const context = {
       signal: new AbortController().signal,
       reportProgress: async () => undefined,
     };
-    expect((await orders.process(new ObjectId(order.id), context)).status).toBe(
+    expect((await orders.process(uuid(order.id), context)).status).toBe(
       "pending",
     );
     expect(
       await database
-        .nativeDb()
-        .collection("background_jobs")
-        .countDocuments({ type: "purchase.track" }),
+        .sql()
+        .table("background_jobs")
+        .count({ type: "purchase.track" }),
     ).toBe(1);
-    expect(
-      await database.nativeDb().collection("phone_numbers").countDocuments(),
-    ).toBe(0);
-    expect((await orders.track(new ObjectId(order.id), context)).status).toBe(
+    expect(await database.sql().table("phone_numbers").count()).toBe(0);
+    expect((await orders.track(uuid(order.id), context)).status).toBe(
       "completed",
     );
     expect(
       await database
-        .nativeDb()
-        .collection("phone_numbers")
-        .countDocuments({ e164: "+18043024183" }),
+        .sql()
+        .table("phone_numbers")
+        .count({ e164: "+18043024183" }),
     ).toBe(1);
     expect(
       await database
-        .nativeDb()
-        .collection("number_assignments")
-        .countDocuments({ customerId, active: true }),
+        .sql()
+        .table("number_assignments")
+        .count({ customerId, active: true }),
     ).toBe(1);
   });
 
@@ -545,31 +523,36 @@ integration("purchase and disconnect workflows", () => {
       assignments,
       audit,
     );
-    const numberId = new ObjectId();
-    const customerId = new ObjectId();
-    const actorId = new ObjectId();
+    const numberId = uuid();
+    const customerId = uuid();
+    const actorId = uuid();
     const account = await database
-      .nativeDb()
-      .collection("carrier_accounts")
-      .findOne({ _id: mockAccountId });
-    await database.nativeDb().collection("phone_numbers").insertOne({
-      _id: numberId,
+      .sql()
+      .table("carrier_accounts")
+      .findOne({ id: mockAccountId });
+    await database.sql().table("phone_numbers").insertOne({
+      id: numberId,
       e164: "+18043024183",
       carrierId: account!.carrierId,
       carrierAccountId: mockAccountId,
       carrierNumberId: "+18043024183",
       status: "active",
     });
-    await database.nativeDb().collection("number_holdings").insertOne({
-      _id: new ObjectId(),
+    await database.sql().table("number_holdings").insertOne({
+      id: uuid(),
       phoneNumberId: numberId,
       carrierAccountId: mockAccountId,
       status: "active",
       startedAt: new Date(),
       createdAt: new Date(),
     });
-    await database.nativeDb().collection("number_assignments").insertOne({
-      _id: new ObjectId(),
+    await database.sql().table("customers").insertOne({
+      id: customerId,
+      name: "Disconnect customer",
+      status: "active",
+    });
+    await database.sql().table("number_assignments").insertOne({
+      id: uuid(),
       phoneNumberId: numberId,
       customerId,
       active: true,
@@ -596,35 +579,22 @@ integration("purchase and disconnect workflows", () => {
       disconnects.create(numberId, "+18043024183", "disconnect-002", actorId),
     ).rejects.toThrow("already pending");
     expect(
-      await database
-        .nativeDb()
-        .collection("number_assignments")
-        .countDocuments({ active: true }),
+      await database.sql().table("number_assignments").count({ active: true }),
     ).toBe(1);
-    const result = await disconnects.process(new ObjectId(first.id), {
+    const result = await disconnects.process(uuid(first.id), {
       signal: new AbortController().signal,
       reportProgress: async () => undefined,
     });
     expect(result.status).toBe("completed");
     expect(
-      (
-        await database
-          .nativeDb()
-          .collection("phone_numbers")
-          .findOne({ _id: numberId })
-      )?.status,
+      (await database.sql().table("phone_numbers").findOne({ id: numberId }))
+        ?.status,
     ).toBe("disconnected");
     expect(
-      await database
-        .nativeDb()
-        .collection("number_assignments")
-        .countDocuments({ active: true }),
+      await database.sql().table("number_assignments").count({ active: true }),
     ).toBe(0);
     expect(
-      await database
-        .nativeDb()
-        .collection("number_holdings")
-        .countDocuments({ status: "closed" }),
+      await database.sql().table("number_holdings").count({ status: "closed" }),
     ).toBe(1);
     expect(await audit.verify()).toMatchObject({ valid: true, count: 2 });
     const inventory = new InventoryService(
@@ -635,40 +605,31 @@ integration("purchase and disconnect workflows", () => {
     );
     await inventory.sync(mockAccountId);
     expect(
-      (
-        await database
-          .nativeDb()
-          .collection("phone_numbers")
-          .findOne({ _id: numberId })
-      )?.status,
+      (await database.sql().table("phone_numbers").findOne({ id: numberId }))
+        ?.status,
     ).toBe("disconnected");
     expect(
-      await database
-        .nativeDb()
-        .collection("reconciliation_issues")
-        .countDocuments({
-          e164: "+18043024183",
-          type: "unexpected_reappearance",
-          status: "open",
-        }),
+      await database.sql().table("reconciliation_issues").count({
+        e164: "+18043024183",
+        type: "unexpected_reappearance",
+        status: "open",
+      }),
     ).toBe(1);
-    await disconnects.process(new ObjectId(first.id), {
+    await disconnects.process(uuid(first.id), {
       signal: new AbortController().signal,
       reportProgress: async () => undefined,
     });
-    expect(
-      await database.nativeDb().collection("number_holdings").countDocuments(),
-    ).toBe(1);
+    expect(await database.sql().table("number_holdings").count()).toBe(1);
   });
 
   it("tracks a pending disconnect and leaves inventory active after provider failure", async () => {
-    const numberId = new ObjectId();
+    const numberId = uuid();
     const account = await database
-      .nativeDb()
-      .collection("carrier_accounts")
-      .findOne({ _id: mockAccountId });
-    await database.nativeDb().collection("phone_numbers").insertOne({
-      _id: numberId,
+      .sql()
+      .table("carrier_accounts")
+      .findOne({ id: mockAccountId });
+    await database.sql().table("phone_numbers").insertOne({
+      id: numberId,
       e164: "+18043024183",
       carrierId: account!.carrierId,
       carrierAccountId: mockAccountId,
@@ -706,42 +667,36 @@ integration("purchase and disconnect workflows", () => {
       numberId,
       "+18043024183",
       "disconnect-pending-001",
-      new ObjectId(),
+      uuid(),
     );
     const context = {
       signal: new AbortController().signal,
       reportProgress: async () => undefined,
     };
-    expect(
-      (await disconnects.process(new ObjectId(request.id), context)).status,
-    ).toBe("pending");
+    expect((await disconnects.process(uuid(request.id), context)).status).toBe(
+      "pending",
+    );
     expect(
       await database
-        .nativeDb()
-        .collection("background_jobs")
-        .countDocuments({ type: "disconnect.track" }),
+        .sql()
+        .table("background_jobs")
+        .count({ type: "disconnect.track" }),
     ).toBe(1);
+    expect((await disconnects.track(uuid(request.id), context)).status).toBe(
+      "failed",
+    );
     expect(
-      (await disconnects.track(new ObjectId(request.id), context)).status,
-    ).toBe("failed");
-    expect(
-      (
-        await database
-          .nativeDb()
-          .collection("phone_numbers")
-          .findOne({ _id: numberId })
-      )?.status,
+      (await database.sql().table("phone_numbers").findOne({ id: numberId }))
+        ?.status,
     ).toBe("active");
-    expect(
-      await database.nativeDb().collection("number_events").countDocuments(),
-    ).toBe(0);
+    expect(await database.sql().table("number_events").count()).toBe(0);
   });
 
   it("protects purchase and disconnect routes and keeps live actions disabled", async () => {
-    const previousUri = process.env.MONGO_URI;
+    const previousUri = process.env.DATABASE_URL;
     const previousSecret = process.env.JWT_SECRET;
     const previousWorker = process.env.DATAPHONE_JOB_WORKER_DISABLED;
-    process.env.MONGO_URI = testUri;
+    process.env.DATABASE_URL = testUri;
     process.env.JWT_SECRET = "phase8-test-secret-with-at-least-32-bytes";
     process.env.DATAPHONE_JOB_WORKER_DISABLED = "true";
     let app: INestApplication | undefined;
@@ -778,9 +733,9 @@ integration("purchase and disconnect workflows", () => {
       expect((await searched.json()) as { offers: unknown[] }).toMatchObject({
         offers: [],
       });
-      const customerId = new ObjectId();
-      await database.nativeDb().collection("customers").insertOne({
-        _id: customerId,
+      const customerId = uuid();
+      await database.sql().table("customers").insertOne({
+        id: customerId,
         externalId: "api-buyer",
         name: "API Buyer",
         status: "active",
@@ -789,27 +744,68 @@ integration("purchase and disconnect workflows", () => {
         method: "POST",
         headers,
         body: JSON.stringify({
-          carrierAccountId: mockAccountId.toHexString(),
-          customerId: customerId.toHexString(),
+          carrierAccountId: mockAccountId,
+          customerId: customerId,
           nativeIds: ["mock-1"],
           idempotencyKey: "api-purchase-001",
         }),
       });
       expect(purchase.status).toBe(409);
-      const numberId = new ObjectId();
+      const viewerResponse = await fetch(`${root}/users`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          email: "search-viewer@example.test",
+          password: "Viewer-password-2026",
+          roleKeys: ["VIEWER"],
+        }),
+      });
+      expect(viewerResponse.status).toBe(201);
+      const viewerLogin = await fetch(`${root}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: "search-viewer@example.test",
+          password: "Viewer-password-2026",
+        }),
+      });
+      const viewerToken = (
+        (await viewerLogin.json()) as { accessToken: string }
+      ).accessToken;
+      const viewerHeaders = {
+        Authorization: `Bearer ${viewerToken}`,
+        "Content-Type": "application/json",
+      };
+      expect(
+        (
+          await fetch(`${root}/purchases/search?areaCode=212&carrier=mock`, {
+            headers: viewerHeaders,
+          })
+        ).status,
+      ).toBe(200);
+      expect(
+        (
+          await fetch(`${root}/purchases`, {
+            method: "POST",
+            headers: viewerHeaders,
+            body: JSON.stringify({}),
+          })
+        ).status,
+      ).toBe(403);
+      const numberId = uuid();
       const bandwidth = await database
-        .nativeDb()
-        .collection("carrier_accounts")
-        .findOne({ _id: bandwidthAccountId });
-      await database.nativeDb().collection("phone_numbers").insertOne({
-        _id: numberId,
+        .sql()
+        .table("carrier_accounts")
+        .findOne({ id: bandwidthAccountId });
+      await database.sql().table("phone_numbers").insertOne({
+        id: numberId,
         e164: "+18043024183",
         carrierId: bandwidth!.carrierId,
         carrierAccountId: bandwidthAccountId,
         status: "active",
       });
       const disconnected = await fetch(
-        `${root}/numbers/${numberId.toHexString()}/disconnect`,
+        `${root}/numbers/${numberId}/disconnect`,
         {
           method: "POST",
           headers,
@@ -820,16 +816,11 @@ integration("purchase and disconnect workflows", () => {
         },
       );
       expect(disconnected.status).toBe(403);
-      expect(
-        await database
-          .nativeDb()
-          .collection("disconnect_requests")
-          .countDocuments(),
-      ).toBe(0);
+      expect(await database.sql().table("disconnect_requests").count()).toBe(0);
     } finally {
       await app?.close();
-      if (previousUri === undefined) delete process.env.MONGO_URI;
-      else process.env.MONGO_URI = previousUri;
+      if (previousUri === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = previousUri;
       if (previousSecret === undefined) delete process.env.JWT_SECRET;
       else process.env.JWT_SECRET = previousSecret;
       if (previousWorker === undefined)

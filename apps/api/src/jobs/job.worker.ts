@@ -103,13 +103,13 @@ export class JobWorker implements OnModuleInit, OnModuleDestroy {
         const job = await this.store.claim(this.owner, this.leaseMs);
         if (!job) break;
         const controller = new AbortController();
-        this.active.set(job._id.toHexString(), controller);
+        this.active.set(job.id, controller);
         const task = this.execute(job, controller)
           .catch(() => {
             // Recovery scanner will reclaim a lease after a storage failure.
           })
           .finally(() => {
-            this.active.delete(job._id.toHexString());
+            this.active.delete(job.id);
             this.running.delete(task);
           });
         this.running.add(task);

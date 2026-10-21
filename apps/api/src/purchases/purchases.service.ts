@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
-import { ObjectId } from "mongodb";
+import { Id } from "../database/query";
 import { CarrierRegistryService } from "../carriers/registry";
 import type { CarrierAccount, CarrierCode } from "../carriers/domain";
 import { CARRIER_CODES } from "../carriers/domain";
@@ -7,13 +7,13 @@ import { CarrierError } from "../carriers/errors";
 import { DatabaseService } from "../database/database.service";
 
 interface CarrierRecord {
-  _id: ObjectId;
+  id: Id;
   code: CarrierCode;
   displayName: string;
 }
 interface CarrierAccountRecord {
-  _id: ObjectId;
-  carrierId: ObjectId;
+  id: Id;
+  carrierId: Id;
   externalAccountId: string;
   credentialRef?: string;
   status: string;
@@ -66,20 +66,20 @@ export class PurchasesService {
     if (!areaCode && !city && !region && !pattern)
       throw new BadRequestException("Provide at least one search filter");
     await this.database.ensureReady();
-    const db = this.database.nativeDb();
+    const db = this.database.sql();
     const carrierRecords = await db
-      .collection<CarrierRecord>("carriers")
+      .table<CarrierRecord>("carriers")
       .find()
       .toArray();
     const byId = new Map(
-      carrierRecords.map((carrier) => [carrier._id.toHexString(), carrier]),
+      carrierRecords.map((carrier) => [carrier.id, carrier]),
     );
     const accounts = await db
-      .collection<CarrierAccountRecord>("carrier_accounts")
+      .table<CarrierAccountRecord>("carrier_accounts")
       .find({ status: "active" })
       .toArray();
     const selected = accounts.flatMap((account) => {
-      const carrier = byId.get(account.carrierId.toHexString());
+      const carrier = byId.get(account.carrierId);
       if (
         !carrier ||
         (input.carrier && carrier.code !== input.carrier) ||
@@ -91,13 +91,13 @@ export class PurchasesService {
     const results = await Promise.all(
       selected.map(async ({ account, carrier }) => {
         const reference: CarrierAccount = {
-          id: account._id.toHexString(),
+          id: account.id,
           carrier: carrier.code,
           nativeAccountId: account.externalAccountId,
           credentialRef: account.credentialRef,
         };
         try {
-          const raw = await this.carriers
+          const result = await this.carriers
             .search(reference)
             .searchNumbers(reference, {
               areaCode,
@@ -106,6 +106,8 @@ export class PurchasesService {
               pattern,
               quantity,
             });
+          const raw = Array.isArray(result) ? result : result.numbers;
+          const partial = !Array.isArray(result) && Boolean(result.partial);
           const offers = raw.slice(0, quantity).map((offer) => {
             if (!offer.nativeId || offer.nativeId.length > 128)
               throw new Error("Invalid offer identity");
@@ -124,7 +126,7 @@ export class PurchasesService {
               nativeId: offer.nativeId,
               carrier: carrier.code,
               carrierName: carrier.displayName,
-              carrierAccountId: account._id.toHexString(),
+              carrierAccountId: account.id,
               locality: offer.locality,
               region: offer.region,
               monthlyPriceCents: offer.monthlyPriceCents,
@@ -132,13 +134,29 @@ export class PurchasesService {
               currency: offer.currency,
             };
           });
-          return { offers, error: null };
+          return {
+            offers,
+            error: null,
+            outcome: {
+              carrier: carrier.code,
+              carrierAccountId: account.id,
+              status: partial ? "partial" : "complete",
+            },
+          };
         } catch (error) {
           return {
             offers: [],
+            outcome: {
+              carrier: carrier.code,
+              carrierAccountId: account.id,
+              status:
+                error instanceof CarrierError && error.kind === "unsupported"
+                  ? "unsupported_filter"
+                  : "failed",
+            },
             error: {
               carrier: carrier.code,
-              carrierAccountId: account._id.toHexString(),
+              carrierAccountId: account.id,
               code:
                 error instanceof CarrierError ? error.kind : "invalid_response",
             },
@@ -155,6 +173,7 @@ export class PurchasesService {
     );
     return {
       offers,
+      outcomes: results.map((result) => result.outcome),
       errors: results.flatMap((result) => (result.error ? [result.error] : [])),
     };
   }

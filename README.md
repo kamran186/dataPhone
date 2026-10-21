@@ -1,57 +1,37 @@
 # DataPhone
 
-Internal DID inventory and inbound porting proof of concept for DataPhone. All implementation phases are tracked in [implementation progress](docs/implementation/PROGRESS.md).
+Internal DID inventory and inbound porting application built with React, NestJS, and PostgreSQL 17. It provides employee sign-in and permissions, unified number inventory, customer ownership and audit history, jobs with live progress, encrypted port documents, reports, and simulated purchase/port workflows.
 
-## Phase 0 feasibility probe
+## Run locally
 
-Requirements: Node.js 24, pnpm 12, and an isolated MongoDB replica set. The test creates and removes a uniquely named temporary database.
+Use Node.js 24, pnpm 12.4.2, and Docker Compose:
 
 ```sh
 pnpm install
-DATAPHONE_TEST_MONGO_URL='mongodb://127.0.0.1:27186/?replicaSet=rs_dataphone_phase0' pnpm test:feasibility
+docker compose up --build -d
 ```
 
-Do not point this probe at a production database. The URL must have access to create and drop its own `dataphone_feasibility_*` database. Without the URL, MongoDB tests are reported as skipped.
+Open http://localhost:8080. PostgreSQL persists in the `postgres_data` volume and is available locally on port 54328. The application initializes a fresh PostgreSQL schema and reproducible development seeds. See [local deployment](docs/deployment/local.md) for native development, environment variables, administrator bootstrap, and database initialization.
 
-See [the architecture](docs/architecture/system.md) and [the feasibility report](docs/implementation/phase-0-report.md) before implementing business features.
+Development demo seeding is repeatable and creates four users: `admin@email.com`, `operationsmanager@email.com`, `operationsstaff@email.com`, and `viewer@email.com`, all initially using `Admin@123456`. Set `DATAPHONE_DEMO_PASSWORD` before the first seed to choose another password. Existing passwords are preserved. Demo and mock modes are disabled in production.
 
-## Run the application
+## Carrier integration
 
-The application has employee sign-in, permission-protected pages, background jobs, unified number inventory, mock purchasing and porting, dashboards, and reports. Keep this local build on a private machine.
+Peerless SOAP, BulkVS REST, and Bandwidth Numbers API v2 expose **inventory and available-number search**. Configure account IDs and credential references using the carrier account API, then inject test credentials through the environment or an untracked `.env.carriers` file for Compose. See the [carrier guide](docs/carriers/integration-requirements.md). No client test credentials have been provided, so live account acceptance remains pending.
+
+The **Search numbers** page is available to inventory viewers. It shows each carrier's supported results, unsupported-filter errors, and partial search coverage. BulkVS supports area-code search by discovering NPA/NXX exchanges. Purchases, disconnects, and port submissions execute only against the local mock carrier. Live operations that incur charges remain disabled.
+
+## Verification
 
 ```sh
-pnpm install
+pnpm typecheck
+pnpm lint
+pnpm format:check
+DATAPHONE_TEST_DATABASE_URL=postgresql://dataphone:dataphone@127.0.0.1:54329/dataphone pnpm test
 pnpm build
-MONGO_URI='mongodb://127.0.0.1:27018/dataphone?directConnection=true' pnpm --filter @dataphone/api start
-pnpm --filter @dataphone/web dev
+pnpm --filter @dataphone/web test:e2e
 ```
 
-The MongoDB server must run as a replica set for later transaction and change-stream features. See [deployment notes](docs/deployment/local.md). For a local container run, use `docker compose up --build -d` and open `http://localhost:8080`.
+Database suites use separate temporary PostgreSQL schemas and need a dedicated test database with schema creation rights. Without `DATAPHONE_TEST_DATABASE_URL`, integration tests are skipped. `pnpm test:feasibility` runs the PostgreSQL persistence checks.
 
-When automatic demo seeding is disabled, initialize an administrator before staff can sign in. See the [local deployment instructions](docs/deployment/local.md) for the bootstrap command and secret handling.
-
-The carrier adapter registry and tested mock are described in [carrier integration requirements](docs/carriers/integration-requirements.md). The only enabled real carrier capability is read-only Bandwidth inventory; live access requires DataPhone account credentials.
-
-The [background jobs report](docs/implementation/phase-5-report.md) describes durable processing and live progress. The Jobs screen shows recent job status to authorized staff.
-
-The [inventory report](docs/implementation/phase-6-report.md) describes carrier accounts, scheduled and manual synchronization, reconciliation, search, and exports. Add a carrier account with `POST /api/v1/carriers/{carrierId}/accounts` using an external account ID and an environment variable name as `credentialRef`. The sync endpoint takes the resulting **account ID**. Only Bandwidth read-only inventory is enabled for live carrier access; Peerless and BulkVS remain unavailable pending contracts.
-
-The [customer and assignment report](docs/implementation/phase-7-report.md) describes customer records, number ownership, transfer history, and audited changes. Authorized staff can assign from a number detail page or select inventory rows for a bulk assignment.
-
-The [purchase and disconnect report](docs/implementation/phase-8-report.md) describes availability search, idempotent multi-number orders, confirmed assignment, tracked disconnects, and live progress. Billable actions remain disabled; mock carrier capabilities were verified in tests.
-
-The [port report](docs/implementation/phase-9-report.md) covers encrypted drafts and documents, mock order tracking, FOC, completion, and audit history. The [dashboard and reporting report](docs/implementation/phase-10-report.md) covers metrics and CSV/Excel exports. To exercise mock operations locally, set `DATAPHONE_ENABLE_MOCK_CARRIER=true` and configure a mock carrier account; production mode never enables the mock. Supply `DATAPHONE_PORT_ENCRYPTION_KEY` before creating a port draft.
-
-### Development sample data
-
-`docker compose up --build` now loads sample data on every API startup. The seed is repeatable: it creates one account for each role, three customers, a local mock carrier account, phone numbers and assignments, orders, ports with an encrypted sample document, completed and failed jobs, sync runs, and reconciliation issues. Existing demo records are retained on restart. It never overwrites a non-demo account with the same email or a non-demo record with the same customer ID or phone number.
-
-Use `admin@email.com`, `operationsmanager@email.com`, `operationsstaff@email.com`, or `viewer@email.com` with the development password `Admin@123456`. These credentials are for local development only. To change the password before the first seed, set `DATAPHONE_DEMO_PASSWORD`; an existing demo account keeps its original password and startup reports a mismatch. Set `DATAPHONE_SEED_DEMO=false` to disable automatic seeding. Seeding is blocked when `NODE_ENV=production`.
-
-To run it manually against the configured development database after building the API, use `DATAPHONE_ENABLE_MOCK_CARRIER=true DATAPHONE_DEMO_PASSWORD='Admin@123456' pnpm --filter @dataphone/api db:seed-demo`. The manual command also needs `MONGO_URI` and `DATAPHONE_PORT_ENCRYPTION_KEY`. In Docker Compose, `docker compose exec api node apps/api/dist/database/demo-cli.js` uses the already configured environment.
-
-To inspect the Docker database in MongoDB Compass, connect to `mongodb://127.0.0.1:27018/dataphone?directConnection=true`, then open the `dataphone` database. The Docker MongoDB is bound to port 27018 on your Mac because a separate local MongoDB may already use port 27017. The Docker data persists in the `dataphone_mongo_data` volume.
-
-For deployment and daily use, see the [production guide](docs/deployment/production.md), [backup and restore](docs/deployment/backup-restore.md), [operator guide](docs/operators/guide.md), [API guide](docs/api.md), and [carrier extension guide](docs/carriers/adding-adapter.md).
-
-Quality checks: `pnpm typecheck`, `pnpm lint`, `pnpm format:check`, `pnpm test`, `pnpm --filter @dataphone/web test:e2e`, and `pnpm build`.
+See the [database design](docs/architecture/database.md), [operator guide](docs/operators/guide.md), [API guide](docs/api.md), [production deployment](docs/deployment/production.md), [backup/restore](docs/deployment/backup-restore.md), and [adding a carrier](docs/carriers/adding-adapter.md).

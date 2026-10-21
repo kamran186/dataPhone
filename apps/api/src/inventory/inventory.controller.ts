@@ -9,17 +9,21 @@ import {
   Res,
 } from "@nestjs/common";
 import type { Response } from "express";
-import { ObjectId } from "mongodb";
+import { Id, uuid } from "../database/query";
 import { RequirePermissions } from "../auth/auth.decorators";
 import { CARRIER_CODES, type CarrierCode } from "../carriers/domain";
 import { JobStore } from "../jobs/job.store";
 import { toCsv, toXlsx } from "./inventory.export";
 import { InventoryService } from "./inventory.service";
 
-function id(value: string): ObjectId {
-  if (!/^[a-f\d]{24}$/i.test(value))
+function id(value: string): Id {
+  if (
+    !/^[a-f\d]{8}-[a-f\d]{4}-[1-5][a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/i.test(
+      value,
+    )
+  )
     throw new BadRequestException("Invalid ID");
-  return new ObjectId(value);
+  return uuid(value);
 }
 
 function query(raw: Record<string, string | undefined>) {
@@ -123,10 +127,10 @@ export class CarriersController {
   async sync(@Param("id") accountId: string) {
     const job = await this.jobs.create({
       type: "inventory.sync",
-      payload: { accountId: id(accountId).toHexString() },
+      payload: { accountId: id(accountId) },
       maxAttempts: 3,
     });
-    return { jobId: job._id.toHexString(), status: job.status };
+    return { jobId: job.id, status: job.status };
   }
 }
 

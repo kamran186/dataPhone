@@ -10,14 +10,14 @@ import { App } from "./app";
 import { useAuthStore } from "./model/use-auth-store";
 
 const user = {
-  id: "507f1f77bcf86cd799439011",
+  id: "ac902665-6c90-55b4-b4ab-36c1e3d87cd8",
   email: "operator@example.test",
   roleKeys: ["SUPER_ADMIN"],
   permissions: ["ports.manage", "customers.view"],
 };
-const portId = "507f1f77bcf86cd799439099";
-const accountId = "507f1f77bcf86cd799439021";
-const customerId = "507f1f77bcf86cd799439012";
+const portId = "8a5de08a-1315-5fd3-8a77-4dc29c9a2b25";
+const accountId = "1fe2a5c3-23da-5705-a7df-8d5cd76fea6d";
+const customerId = "10bb07ef-2c43-5119-920c-da830352f069";
 
 beforeEach(() => {
   useAuthStore.setState({

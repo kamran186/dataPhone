@@ -1,38 +1,43 @@
 import "reflect-metadata";
 import { randomUUID } from "node:crypto";
-import { ObjectId } from "mongodb";
+import { Id, uuid } from "../src/database/query";
 import { loadConfig } from "../src/config/app-config";
 import { DatabaseService } from "../src/database/database.service";
 import { PortDocuments } from "../src/ports/port.documents";
 import { AuditService } from "../src/ownership/audit.service";
 
-const baseUrl = process.env.DATAPHONE_TEST_MONGO_URL;
+const baseUrl = process.env.DATAPHONE_TEST_DATABASE_URL;
 const integration = baseUrl ? describe : describe.skip;
 
 integration("encrypted port documents", () => {
   let database: DatabaseService;
-  let portId: ObjectId;
+  let portId: Id;
   const previousKey = process.env.DATAPHONE_PORT_ENCRYPTION_KEY;
 
   beforeAll(async () => {
     process.env.DATAPHONE_PORT_ENCRYPTION_KEY = Buffer.alloc(32, 4).toString(
       "base64",
     );
-    const url = new URL(baseUrl ?? "mongodb://127.0.0.1:27017/");
-    url.pathname = `/dataphone_phase9_documents_${randomUUID().replaceAll("-", "")}`;
+    const url = new URL(
+      baseUrl ?? "postgresql://dataphone:dataphone@127.0.0.1:54329/dataphone",
+    );
+    url.searchParams.set(
+      "schema",
+      `dataphone_phase9_documents_${randomUUID().replaceAll("-", "")}`,
+    );
     database = new DatabaseService(
-      loadConfig({ MONGO_URI: url.toString(), NODE_ENV: "test" }),
+      loadConfig({ DATABASE_URL: url.toString(), NODE_ENV: "test" }),
     );
     await database.ensureReady();
-    portId = new ObjectId();
+    portId = uuid();
     await database
-      .nativeDb()
-      .collection("port_requests")
-      .insertOne({ _id: portId, status: "DRAFT" });
+      .sql()
+      .table("port_requests")
+      .insertOne({ id: portId, status: "DRAFT" });
   });
 
   afterAll(async () => {
-    if (database?.isConnected()) await database.nativeDb().dropDatabase();
+    if (database?.isConnected()) await database.dropTestSchema();
     await database?.close();
     if (previousKey === undefined)
       delete process.env.DATAPHONE_PORT_ENCRYPTION_KEY;
@@ -47,15 +52,15 @@ integration("encrypted port documents", () => {
       "invoice.pdf",
       "application/pdf",
       plain,
-      new ObjectId(),
+      uuid(),
     );
     expect((await service.list(portId)).map((item) => item.id)).toContain(
       uploaded.id,
     );
     const metadata = await database
-      .nativeDb()
-      .collection("port_documents")
-      .findOne({ _id: new ObjectId(uploaded.id) });
+      .sql()
+      .table("port_documents")
+      .findOne({ id: uuid(uploaded.id) });
     const stored = await database.downloadDocument(metadata!.fileId);
     expect(stored.includes(plain)).toBe(false);
     expect(await new AuditService(database).verify()).toMatchObject({
@@ -63,24 +68,24 @@ integration("encrypted port documents", () => {
       count: 1,
     });
     expect(
-      await database.nativeDb().collection("port_events").countDocuments({
+      await database.sql().table("port_events").count({
         portRequestId: portId,
         type: "port.document_uploaded",
       }),
     ).toBe(1);
-    expect(
-      (await service.download(portId, new ObjectId(uploaded.id))).content,
-    ).toEqual(plain);
-    await expect(
-      service.download(new ObjectId(), new ObjectId(uploaded.id)),
-    ).rejects.toThrow("Document not found");
+    expect((await service.download(portId, uuid(uploaded.id))).content).toEqual(
+      plain,
+    );
+    await expect(service.download(uuid(), uuid(uploaded.id))).rejects.toThrow(
+      "Document not found",
+    );
     await expect(
       service.upload(
         portId,
         "bad.exe",
         "application/octet-stream",
         plain,
-        new ObjectId(),
+        uuid(),
       ),
     ).rejects.toThrow("Unsupported");
   });

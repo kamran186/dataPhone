@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 const user = {
-  id: "507f1f77bcf86cd799439011",
+  id: "ac902665-6c90-55b4-b4ab-36c1e3d87cd8",
   email: "operator@example.test",
   roleKeys: ["SUPER_ADMIN"],
   permissions: [
@@ -32,7 +32,7 @@ test.beforeEach(async ({ page }) => {
           }
         : path.endsWith("/ports") && method === "POST"
           ? {
-              id: "507f1f77bcf86cd799439099",
+              id: "8a5de08a-1315-5fd3-8a77-4dc29c9a2b25",
               status: "DRAFT",
               numbers: ["+18043024183"],
             }
@@ -45,7 +45,7 @@ test.beforeEach(async ({ page }) => {
                     displayName: "Mock",
                     accounts: [
                       {
-                        id: "507f1f77bcf86cd799439021",
+                        id: "1fe2a5c3-23da-5705-a7df-8d5cd76fea6d",
                         externalAccountId: "sandbox",
                         status: "active",
                       },
@@ -56,7 +56,7 @@ test.beforeEach(async ({ page }) => {
                 ? {
                     items: [
                       {
-                        id: "507f1f77bcf86cd799439012",
+                        id: "10bb07ef-2c43-5119-920c-da830352f069",
                         name: "Acme West",
                         status: "active",
                       },
@@ -98,10 +98,10 @@ test("port wizard submits a draft and removes secrets from the screen", async ({
   await page.getByRole("button", { name: "New port request" }).click();
   await page
     .getByLabel("Customer", { exact: true })
-    .selectOption("507f1f77bcf86cd799439012");
+    .selectOption("10bb07ef-2c43-5119-920c-da830352f069");
   await page
     .getByLabel("Destination carrier account")
-    .selectOption("507f1f77bcf86cd799439021");
+    .selectOption("1fe2a5c3-23da-5705-a7df-8d5cd76fea6d");
   for (const [name, value] of [
     ["Numbers to port", "+18043024183"],
     ["Current provider", "Old Carrier"],

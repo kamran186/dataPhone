@@ -6,7 +6,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { MongoServerError, ObjectId } from "mongodb";
+import { DatabaseError, Id, uuid } from "../database/query";
 import type {
   CarrierAccount,
   CarrierCode,
@@ -26,25 +26,25 @@ import { AssignmentsService } from "../ownership/assignments.service";
 import { AuditService } from "../ownership/audit.service";
 
 interface AccountRecord {
-  _id: ObjectId;
-  carrierId: ObjectId;
+  id: Id;
+  carrierId: Id;
   externalAccountId: string;
   credentialRef?: string;
   status: string;
 }
 interface CarrierRecord {
-  _id: ObjectId;
+  id: Id;
   code: CarrierCode;
 }
 interface PurchaseRecord {
-  _id: ObjectId;
+  id: Id;
   idempotencyKey: string;
   requestHash: string;
-  actorId: ObjectId;
-  customerId: ObjectId;
-  carrierAccountId: ObjectId;
+  actorId: Id;
+  customerId: Id;
+  carrierAccountId: Id;
   nativeIds: string[];
-  jobId: ObjectId;
+  jobId: Id;
   status:
     | "queued"
     | "running"
@@ -64,15 +64,15 @@ interface PurchaseRecord {
 
 function view(order: PurchaseRecord) {
   return {
-    id: order._id.toHexString(),
+    id: order.id,
     status: order.status,
-    carrierAccountId: order.carrierAccountId.toHexString(),
-    customerId: order.customerId.toHexString(),
+    carrierAccountId: order.carrierAccountId,
+    customerId: order.customerId,
     nativeIds: order.nativeIds,
     nativeOrderId: order.nativeOrderId,
     items: order.items,
     unfulfilledCount: order.unfulfilledCount,
-    jobId: order.jobId.toHexString(),
+    jobId: order.jobId,
     errorCode: order.errorCode,
     createdAt: order.createdAt,
     updatedAt: order.updatedAt,
@@ -103,12 +103,12 @@ export class PurchaseOrdersService {
 
   async create(
     input: {
-      carrierAccountId: ObjectId;
-      customerId: ObjectId;
+      carrierAccountId: Id;
+      customerId: Id;
       nativeIds: string[];
       idempotencyKey: string;
     },
-    actorId: ObjectId,
+    actorId: Id,
   ) {
     if (!/^[A-Za-z0-9:_-]{8,128}$/.test(input.idempotencyKey))
       throw new BadRequestException("Invalid idempotency key");
@@ -125,18 +125,18 @@ export class PurchaseOrdersService {
         "Provide 1 to 20 distinct carrier number IDs",
       );
     await this.database.ensureReady();
-    const db = this.database.nativeDb();
+    const db = this.database.sql();
     const requestHash = createHash("sha256")
       .update(
         JSON.stringify({
-          accountId: input.carrierAccountId.toHexString(),
-          customerId: input.customerId.toHexString(),
+          accountId: input.carrierAccountId,
+          customerId: input.customerId,
           nativeIds: [...input.nativeIds].sort(),
         }),
       )
       .digest("hex");
     const previous = await db
-      .collection<PurchaseRecord>("purchase_orders")
+      .table<PurchaseRecord>("purchase_orders")
       .findOne({ idempotencyKey: input.idempotencyKey });
     if (previous) {
       if (previous.requestHash !== requestHash)
@@ -146,40 +146,40 @@ export class PurchaseOrdersService {
       return view(previous);
     }
     const account = await db
-      .collection<AccountRecord>("carrier_accounts")
-      .findOne({ _id: input.carrierAccountId, status: "active" });
+      .table<AccountRecord>("carrier_accounts")
+      .findOne({ id: input.carrierAccountId, status: "active" });
     if (!account) throw new NotFoundException("Carrier account not found");
     const carrier = await db
-      .collection<CarrierRecord>("carriers")
-      .findOne({ _id: account.carrierId });
+      .table<CarrierRecord>("carriers")
+      .findOne({ id: account.carrierId });
     if (!carrier) throw new NotFoundException("Carrier not found");
     if (carrier.code !== "mock")
       throw new ForbiddenException("Live billable purchases are disabled");
     if (!this.carriers.capabilities(carrier.code).includes("number.purchase"))
       throw new ConflictException("Carrier purchase capability is unavailable");
     const customer = await db
-      .collection("customers")
-      .findOne({ _id: input.customerId, status: "active" });
+      .table("customers")
+      .findOne({ id: input.customerId, status: "active" });
     if (!customer) throw new NotFoundException("Active customer not found");
     const now = new Date();
     try {
       const order = await this.database.withTransaction(async (tx, session) => {
-        const id = new ObjectId();
+        const id = uuid();
         const job = await this.jobs.createInTransaction(tx, session, {
           type: "purchase.execute",
-          payload: { orderId: id.toHexString() },
+          payload: { orderId: id },
           idempotencyKey: `purchase:${input.idempotencyKey}`,
           maxAttempts: 5,
         });
         const record: PurchaseRecord = {
-          _id: id,
+          id: id,
           idempotencyKey: input.idempotencyKey,
           requestHash,
           actorId,
           customerId: input.customerId,
           carrierAccountId: input.carrierAccountId,
           nativeIds: input.nativeIds,
-          jobId: job._id,
+          jobId: job.id,
           status: "queued",
           items: [],
           unfulfilledCount: input.nativeIds.length,
@@ -187,16 +187,16 @@ export class PurchaseOrdersService {
           updatedAt: now,
         };
         await tx
-          .collection<PurchaseRecord>("purchase_orders")
+          .table<PurchaseRecord>("purchase_orders")
           .insertOne(record, { session });
         return record;
       });
       return view(order);
     } catch (error) {
-      if (!(error instanceof MongoServerError && error.code === 11000))
+      if (!(error instanceof DatabaseError && error.code === "23505"))
         throw error;
       const existing = await db
-        .collection<PurchaseRecord>("purchase_orders")
+        .table<PurchaseRecord>("purchase_orders")
         .findOne({ idempotencyKey: input.idempotencyKey });
       if (!existing || existing.requestHash !== requestHash)
         throw new ConflictException(
@@ -206,12 +206,12 @@ export class PurchaseOrdersService {
     }
   }
 
-  async get(id: ObjectId) {
+  async get(id: Id) {
     await this.database.ensureReady();
     const order = await this.database
-      .nativeDb()
-      .collection<PurchaseRecord>("purchase_orders")
-      .findOne({ _id: id });
+      .sql()
+      .table<PurchaseRecord>("purchase_orders")
+      .findOne({ id: id });
     if (!order) throw new NotFoundException("Purchase order not found");
     return view(order);
   }
@@ -228,13 +228,13 @@ export class PurchaseOrdersService {
       throw new BadRequestException("Invalid purchase page");
     await this.database.ensureReady();
     const collection = this.database
-      .nativeDb()
-      .collection<PurchaseRecord>("purchase_orders");
+      .sql()
+      .table<PurchaseRecord>("purchase_orders");
     const [total, orders] = await Promise.all([
-      collection.countDocuments(),
+      collection.count(),
       collection
         .find()
-        .sort({ createdAt: -1, _id: -1 })
+        .sort({ createdAt: -1, id: -1 })
         .skip((page - 1) * pageSize)
         .limit(pageSize)
         .toArray(),
@@ -243,14 +243,14 @@ export class PurchaseOrdersService {
   }
 
   async process(
-    id: ObjectId,
+    id: Id,
     context: JobHandlerContext,
     providerOverride?: CarrierOrder,
   ): Promise<{ status: string; confirmed: number }> {
     await this.database.ensureReady();
-    const db = this.database.nativeDb();
-    const orders = db.collection<PurchaseRecord>("purchase_orders");
-    const order = await orders.findOne({ _id: id });
+    const db = this.database.sql();
+    const orders = db.table<PurchaseRecord>("purchase_orders");
+    const order = await orders.findOne({ id: id });
     if (!order) throw new NotFoundException("Purchase order not found");
     if (["completed", "partial", "failed"].includes(order.status))
       return {
@@ -262,23 +262,23 @@ export class PurchaseOrdersService {
       return this.track(id, context);
     if (context.signal.aborted) throw new Error("Purchase job interrupted");
     const account = await db
-      .collection<AccountRecord>("carrier_accounts")
-      .findOne({ _id: order.carrierAccountId, status: "active" });
+      .table<AccountRecord>("carrier_accounts")
+      .findOne({ id: order.carrierAccountId, status: "active" });
     if (!account) throw new NotFoundException("Carrier account not found");
     const carrier = await db
-      .collection<CarrierRecord>("carriers")
-      .findOne({ _id: account.carrierId });
+      .table<CarrierRecord>("carriers")
+      .findOne({ id: account.carrierId });
     if (!carrier) throw new NotFoundException("Carrier not found");
     if (carrier.code !== "mock")
       throw new ForbiddenException("Live billable purchases are disabled");
     const reference: CarrierAccount = {
-      id: account._id.toHexString(),
+      id: account.id,
       carrier: carrier.code,
       nativeAccountId: account.externalAccountId,
       credentialRef: account.credentialRef,
     };
     await orders.updateOne(
-      { _id: id, status: { $in: ["queued", "retrying"] } },
+      { id: id, status: { $in: ["queued", "retrying"] } },
       { $set: { status: "running", updatedAt: new Date() } },
     );
     await context.reportProgress(10, "Requesting carrier order");
@@ -292,7 +292,7 @@ export class PurchaseOrdersService {
         }));
     } catch (error) {
       await orders.updateOne(
-        { _id: id },
+        { id: id },
         {
           $set: {
             status:
@@ -311,12 +311,12 @@ export class PurchaseOrdersService {
     if (providerOrder.status === "pending") {
       await this.database.withTransaction(async (tx, session) => {
         const fresh = await tx
-          .collection<PurchaseRecord>("purchase_orders")
-          .findOne({ _id: id }, { session });
+          .table<PurchaseRecord>("purchase_orders")
+          .findOne({ id: id }, { session });
         if (!fresh) throw new NotFoundException("Purchase order not found");
         const trackAttempt = (fresh.trackAttempt ?? 0) + 1;
-        await tx.collection<PurchaseRecord>("purchase_orders").updateOne(
-          { _id: id },
+        await tx.table<PurchaseRecord>("purchase_orders").updateOne(
+          { id: id },
           {
             $set: {
               status: "pending",
@@ -333,8 +333,8 @@ export class PurchaseOrdersService {
         )
           await this.jobs.createInTransaction(tx, session, {
             type: "purchase.track",
-            payload: { orderId: id.toHexString() },
-            idempotencyKey: `purchase-track:${id.toHexString()}:${trackAttempt}`,
+            payload: { orderId: id },
+            idempotencyKey: `purchase-track:${id}:${trackAttempt}`,
             runAt: new Date(Date.now() + 60_000),
             maxAttempts: 5,
           });
@@ -343,7 +343,7 @@ export class PurchaseOrdersService {
     }
     if (providerOrder.status === "failed") {
       await orders.updateOne(
-        { _id: id },
+        { id: id },
         {
           $set: {
             status: "failed",
@@ -363,30 +363,30 @@ export class PurchaseOrdersService {
     await context.reportProgress(70, "Recording confirmed numbers");
     const updated = await this.database.withTransaction(async (tx, session) => {
       const fresh = await tx
-        .collection<PurchaseRecord>("purchase_orders")
-        .findOne({ _id: id }, { session });
+        .table<PurchaseRecord>("purchase_orders")
+        .findOne({ id: id }, { session });
       if (!fresh) throw new NotFoundException("Purchase order not found");
       if (["completed", "partial", "failed"].includes(fresh.status))
         return fresh;
       const items: PurchaseRecord["items"] = [];
       for (const e164 of numbers) {
         const existing = await tx
-          .collection<PhoneNumberRecord>("phone_numbers")
+          .table<PhoneNumberRecord>("phone_numbers")
           .findOne({ e164 }, { session });
-        if (existing && !existing.carrierAccountId.equals(account._id)) {
+        if (existing && existing.carrierAccountId !== account.id) {
           await tx
-            .collection<ReconciliationIssueRecord>("reconciliation_issues")
+            .table<ReconciliationIssueRecord>("reconciliation_issues")
             .updateOne(
               {
-                carrierAccountId: account._id,
+                carrierAccountId: account.id,
                 e164,
                 type: "purchase_conflict",
                 status: "open",
               },
               {
                 $setOnInsert: {
-                  _id: new ObjectId(),
-                  phoneNumberId: existing._id,
+                  id: uuid(),
+                  phoneNumberId: existing.id,
                   detectedAt: new Date(),
                 },
               },
@@ -398,25 +398,25 @@ export class PurchaseOrdersService {
         const activeAssignment =
           existing &&
           (await tx
-            .collection("number_assignments")
+            .table("number_assignments")
             .findOne(
-              { phoneNumberId: existing._id, active: true },
+              { phoneNumberId: existing.id, active: true },
               { session },
             ));
         if (activeAssignment) {
           await tx
-            .collection<ReconciliationIssueRecord>("reconciliation_issues")
+            .table<ReconciliationIssueRecord>("reconciliation_issues")
             .updateOne(
               {
-                carrierAccountId: account._id,
+                carrierAccountId: account.id,
                 e164,
                 type: "purchase_conflict",
                 status: "open",
               },
               {
                 $setOnInsert: {
-                  _id: new ObjectId(),
-                  phoneNumberId: existing!._id,
+                  id: uuid(),
+                  phoneNumberId: existing!.id,
                   detectedAt: new Date(),
                 },
               },
@@ -426,14 +426,14 @@ export class PurchaseOrdersService {
           continue;
         }
         const now = new Date();
-        const numberId = existing?._id ?? new ObjectId();
+        const numberId = existing?.id ?? uuid();
         if (!existing) {
-          await tx.collection<PhoneNumberRecord>("phone_numbers").insertOne(
+          await tx.table<PhoneNumberRecord>("phone_numbers").insertOne(
             {
-              _id: numberId,
+              id: numberId,
               e164,
-              carrierId: carrier._id,
-              carrierAccountId: account._id,
+              carrierId: carrier.id,
+              carrierAccountId: account.id,
               carrierNumberId: e164,
               status: "active",
               firstSeenAt: now,
@@ -443,11 +443,11 @@ export class PurchaseOrdersService {
             },
             { session },
           );
-          await tx.collection<HoldingRecord>("number_holdings").insertOne(
+          await tx.table<HoldingRecord>("number_holdings").insertOne(
             {
-              _id: new ObjectId(),
+              id: uuid(),
               phoneNumberId: numberId,
-              carrierAccountId: account._id,
+              carrierAccountId: account.id,
               status: "active",
               startedAt: now,
               createdAt: now,
@@ -456,17 +456,17 @@ export class PurchaseOrdersService {
           );
         } else if (existing.status !== "active") {
           await tx
-            .collection<PhoneNumberRecord>("phone_numbers")
+            .table<PhoneNumberRecord>("phone_numbers")
             .updateOne(
-              { _id: numberId },
+              { id: numberId },
               { $set: { status: "active", lastSeenAt: now, updatedAt: now } },
               { session },
             );
-          await tx.collection<HoldingRecord>("number_holdings").insertOne(
+          await tx.table<HoldingRecord>("number_holdings").insertOne(
             {
-              _id: new ObjectId(),
+              id: uuid(),
               phoneNumberId: numberId,
-              carrierAccountId: account._id,
+              carrierAccountId: account.id,
               status: "active",
               startedAt: now,
               createdAt: now,
@@ -480,7 +480,7 @@ export class PurchaseOrdersService {
           customerId: order.customerId,
           phoneNumberId: numberId,
           previous: null,
-          next: { carrierAccountId: account._id.toHexString(), e164 },
+          next: { carrierAccountId: account.id, e164 },
         });
         await this.assignments.assignInTransaction(
           tx,
@@ -509,8 +509,8 @@ export class PurchaseOrdersService {
         updatedAt: new Date(),
       };
       await tx
-        .collection<PurchaseRecord>("purchase_orders")
-        .replaceOne({ _id: id }, next, { session });
+        .table<PurchaseRecord>("purchase_orders")
+        .replaceOne({ id: id }, next, { session });
       return next;
     });
     return {
@@ -521,14 +521,14 @@ export class PurchaseOrdersService {
   }
 
   async track(
-    id: ObjectId,
+    id: Id,
     context: JobHandlerContext,
   ): Promise<{ status: string; confirmed: number }> {
     await this.database.ensureReady();
-    const db = this.database.nativeDb();
+    const db = this.database.sql();
     const order = await db
-      .collection<PurchaseRecord>("purchase_orders")
-      .findOne({ _id: id });
+      .table<PurchaseRecord>("purchase_orders")
+      .findOne({ id: id });
     if (!order) throw new NotFoundException("Purchase order not found");
     if (["completed", "partial", "failed"].includes(order.status))
       return {
@@ -539,17 +539,17 @@ export class PurchaseOrdersService {
     if (!order.nativeOrderId)
       throw new ConflictException("Carrier order has not been accepted");
     const account = await db
-      .collection<AccountRecord>("carrier_accounts")
-      .findOne({ _id: order.carrierAccountId });
+      .table<AccountRecord>("carrier_accounts")
+      .findOne({ id: order.carrierAccountId });
     if (!account) throw new NotFoundException("Carrier account not found");
     const carrier = await db
-      .collection<CarrierRecord>("carriers")
-      .findOne({ _id: account.carrierId });
+      .table<CarrierRecord>("carriers")
+      .findOne({ id: account.carrierId });
     if (!carrier) throw new NotFoundException("Carrier not found");
     if (carrier.code !== "mock")
       throw new ForbiddenException("Live billable purchases are disabled");
     const reference: CarrierAccount = {
-      id: account._id.toHexString(),
+      id: account.id,
       carrier: carrier.code,
       nativeAccountId: account.externalAccountId,
       credentialRef: account.credentialRef,

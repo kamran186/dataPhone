@@ -1,23 +1,33 @@
-# Carrier adapter integration requirements
+# Carrier integration requirements
 
-Phase 4 adds a carrier registry with typed ports for inventory, search, purchase, disconnect, portability, port submission, order status, and port documents. The registry resolves a capability for a carrier account or throws a structured `unsupported` error. A carrier can advertise a capability only when its matching implementation exists. `MockCarrierAdapter` is an explicit deterministic test fixture and is not registered in the running API.
+| Carrier | Enabled live capabilities | Implementation source |
+| --- | --- | --- |
+| Peerless | Inventory, available-number search | Supplied [service WSDL](contracts/peerless/APIService.wsdl) and [port type WSDL](contracts/peerless/APIServicePortType.wsdl) |
+| BulkVS | Inventory, available-number search | [REST OpenAPI](https://portal.bulkvs.com/api/v1.0/openapi) |
+| Bandwidth | Inventory, available-number search | [My Numbers v2](https://dev.bandwidth.com/apis/numbers-apis/my-numbers/), [Numbers v2](https://dev.bandwidth.com/apis/numbers-apis/numbers/) |
 
-## Implemented provider paths
+Peerless uses `getTnInventoryReport` and `searchNumbers` at the endpoint supplied in the WSDL. SOAP operation names are allowlisted; the adapter cannot submit an order. The checked-in WSDLs have matching import filenames. XML parsing rejects DTDs/entities and does not coerce phone numbers into numeric values. The report is normalized as numbers held in the carrier account; provider-specific status semantics still require live validation.
 
-| Provider | Enabled capability | Contract source | Status |
-| --- | --- | --- | --- |
-| Bandwidth | Read-only in-service inventory via JSON Numbers API v2 | [My Numbers API](https://dev.bandwidth.com/apis/numbers-apis/my-numbers/) | Implemented and contract-tested with intercepted transport; requires account ID and credentials for live verification |
-| BulkVS | None | [Developer overview](https://www.bulkvs.com/developers.html), [SOAP guide](https://portal.bulkvs.com/assets/images/API-SOAP-HOWTO.pdf) | Adapter registered; account WSDL and operation contracts needed before enabling |
-| Peerless | None | No WSDL supplied | Adapter registered; WSDL and account access needed before enabling |
+BulkVS uses `GET /tnRecord` without Number or Limit to retrieve all account entries, as documented. There is no documented cursor. A response exceeding the bounded size fails the sync; it is never silently truncated. Compare the returned count with the account portal during acceptance, particularly for large accounts. Search uses `/exchanges?Search=NPA` then `GET /orderTn` with NPA and NXX, at most ten exchange calls per search. Incomplete exchange coverage is labeled partial. A search 404 means no offers; an inventory 404 fails synchronization.
 
-Bandwidth inventory uses `GET https://api.bandwidth.com/api/v2/accounts/{accountId}/inserviceNumbers`, Basic authentication, bounded page size, and the documented `phoneNumbers`, `totalCount`, and `links.next` fields. Pagination follows only a validated page token from the documented host and account path. Native phone numbers are normalized to E.164. No live Bandwidth call has been made.
+Bandwidth uses JSON `GET /api/v2/accounts/{accountId}/inserviceNumbers` and `/availableNumbers`. It validates pagination host/account paths, normalizes E.164, and searches USA numbers. Supported filters include area code, state, city with state, and numeric vanity/suffix terms. `*1000` means a suffix search. Peerless supports area code, state, location, and numeric vanity digits without wildcard syntax. BulkVS supports area code only. Unsupported filters are surfaced rather than discarded.
 
-## Secrets and failure handling
+## Account configuration and secrets
 
-Carrier account records contain a `credentialRef`, not a password. For reference `BANDWIDTH_MAIN`, the API reads `DATAPHONE_CARRIER_BANDWIDTH_MAIN_USERNAME` and `DATAPHONE_CARRIER_BANDWIDTH_MAIN_PASSWORD` from its process environment. Supply these through a deployment secret manager; keep them out of Git, URL query strings, logs, and API responses. The runtime registers the local mock only when `DATAPHONE_ENABLE_MOCK_CARRIER=true` and `NODE_ENV` is not `production`; production never registers a mock.
+An administrator obtains carrier UUIDs from `GET /api/v1/carriers`, then calls `POST /api/v1/carriers/{carrierId}/accounts` with `externalAccountId` and `credentialRef`. Bandwidth requires its real account ID; use the client's carrier account identifier for Peerless and BulkVS. Account references must be distinct when credentials address different inventories. Use the resulting local account UUID with `POST /api/v1/carriers/{accountId}/sync`; the sync is also scheduled hourly. Account configuration is available through the API; inventory and sync state are displayed in the application.
 
-Outbound requests use HTTPS, reject redirects, time out after 10 seconds by default, and cap JSON responses at 1 MB. HTTP 401/403 map to authentication errors; 429 maps to a retryable rate-limit error carrying a bounded `Retry-After` delay; 408/504 map to timeouts; 5xx map to retryable upstream failures. Consumers should schedule a delayed job from `retryAfterMs` rather than immediately repeating a 429 request. No carrier-specific request quota is assumed without account documentation. Errors contain no response body or credential value.
+For credential reference `BANDWIDTH_MAIN`, inject `DATAPHONE_CARRIER_BANDWIDTH_MAIN_USERNAME` and `_PASSWORD`. For `PEERLESS_MAIN`, `_USERNAME` means WSDL `userId`, `_PASSWORD` means `passCode`, and `_CUSTOMER` is required. BulkVS supports `_USERNAME`/`_PASSWORD` as Basic API credentials or `_AUTHORIZATION` containing the exact Basic/Bearer authorization supplied for the account. The public BulkVS spec does not define authentication; confirm the client's credential format during acceptance.
 
-## Before enabling other operations
+Store secrets in the process environment or a secret manager. Local Compose optionally reads the ignored `.env.carriers` file. No password, SOAP body, Authorization header, or provider error body is logged or returned. Account API responses expose only references and status.
 
-Obtain the exact provider operation contract, sandbox credentials, account permissions, status/error samples, request limits, idempotency behavior, and billing/release implications. For Peerless, obtain its WSDL and endpoint details. For BulkVS, obtain the account WSDL and confirm the SOAP method, field, authentication, and error contracts for each intended operation. For Bandwidth write operations, confirm current account-specific API version, product configuration, order and callback semantics, and idempotency before implementation. Real purchase, disconnect, and port submission remain disabled pending separate operational authorization.
+## Limits and acceptance
+
+HTTPS is required, redirects are rejected, requests are bounded, and inventory responses are capped at 32 MB for providers without pagination. Bandwidth pages and search responses are capped at 1 MB. Inventory synchronization is capped at 100,000 unique numbers and 1,000 pages. Authentication, rate-limit, timeout, configuration, and upstream errors are sanitized. Jobs retry transient failures with backoff. Missing credentials fail without changing held numbers.
+
+A full snapshot is read before any reconciliation writes. Count changes, count mismatches, empty continuation pages, repeated tokens, malformed records, oversized responses, and transport failures reject the snapshot before marking numbers missing.
+
+Contract tests verify the documented wire formats and failure handling. Test credentials are not yet available. Before live acceptance, verify all account endpoints/permissions, compare complete inventory counts with the portals, search one supported query per carrier, and confirm account-specific error/status behavior. The Peerless WSDL endpoint and BulkVS authentication must be confirmed against those accounts.
+
+Real purchase, disconnect, and port submission remain blocked by both capability registration and service guards. A configured live account never enables these operations. The mock carrier is opt-in for development and cannot be enabled in production.
+
+Client-provided Bandwidth references: [Numbers overview](https://dev.bandwidth.com/docs/numbers/), [migration URL](https://dev.bandwidth.com/docs/numbers/v2/migration), and [search guide](https://dev.bandwidth.com/docs/numbers/guides/searchingForNumbers/). The migration URL was not accessible during review; the current v2 API references above define the implemented paths and response fields. The search guide contains legacy path examples and should not be copied into the v2 adapter.

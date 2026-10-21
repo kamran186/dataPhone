@@ -6,7 +6,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { MongoServerError, ObjectId } from "mongodb";
+import { DatabaseError, Id, uuid } from "../database/query";
 import type {
   CarrierAccount,
   CarrierCode,
@@ -25,25 +25,25 @@ import { AssignmentsService } from "../ownership/assignments.service";
 import { AuditService } from "../ownership/audit.service";
 
 interface AccountRecord {
-  _id: ObjectId;
-  carrierId: ObjectId;
+  id: Id;
+  carrierId: Id;
   externalAccountId: string;
   credentialRef?: string;
   status: string;
 }
 interface CarrierRecord {
-  _id: ObjectId;
+  id: Id;
   code: CarrierCode;
 }
 interface DisconnectRecord {
-  _id: ObjectId;
+  id: Id;
   idempotencyKey: string;
   requestHash: string;
-  phoneNumberId: ObjectId;
+  phoneNumberId: Id;
   e164: string;
-  carrierAccountId: ObjectId;
-  actorId: ObjectId;
-  jobId: ObjectId;
+  carrierAccountId: Id;
+  actorId: Id;
+  jobId: Id;
   status:
     "queued" | "running" | "retrying" | "pending" | "completed" | "failed";
   nativeOrderId?: string;
@@ -55,12 +55,12 @@ interface DisconnectRecord {
 
 function view(request: DisconnectRecord) {
   return {
-    id: request._id.toHexString(),
-    phoneNumberId: request.phoneNumberId.toHexString(),
+    id: request.id,
+    phoneNumberId: request.phoneNumberId,
     e164: request.e164,
     status: request.status,
     nativeOrderId: request.nativeOrderId,
-    jobId: request.jobId.toHexString(),
+    jobId: request.jobId,
     errorCode: request.errorCode,
     createdAt: request.createdAt,
     updatedAt: request.updatedAt,
@@ -78,26 +78,26 @@ export class DisconnectService {
   ) {}
 
   async create(
-    numberId: ObjectId,
+    numberId: Id,
     confirmE164: string,
     idempotencyKey: string,
-    actorId: ObjectId,
+    actorId: Id,
   ) {
     if (!/^[A-Za-z0-9:_-]{8,128}$/.test(idempotencyKey))
       throw new BadRequestException("Invalid idempotency key");
     await this.database.ensureReady();
-    const db = this.database.nativeDb();
+    const db = this.database.sql();
     const number = await db
-      .collection<PhoneNumberRecord>("phone_numbers")
-      .findOne({ _id: numberId });
+      .table<PhoneNumberRecord>("phone_numbers")
+      .findOne({ id: numberId });
     if (!number) throw new NotFoundException("Number not found");
     if (confirmE164 !== number.e164)
       throw new BadRequestException("Number confirmation does not match");
     const requestHash = createHash("sha256")
-      .update(`${numberId.toHexString()}\n${number.e164}`)
+      .update(`${numberId}\n${number.e164}`)
       .digest("hex");
     const previous = await db
-      .collection<DisconnectRecord>("disconnect_requests")
+      .table<DisconnectRecord>("disconnect_requests")
       .findOne({ idempotencyKey });
     if (previous) {
       if (previous.requestHash !== requestHash)
@@ -107,7 +107,7 @@ export class DisconnectService {
       return view(previous);
     }
     const activeRequest = await db
-      .collection<DisconnectRecord>("disconnect_requests")
+      .table<DisconnectRecord>("disconnect_requests")
       .findOne({
         phoneNumberId: numberId,
         status: { $in: ["queued", "running", "retrying", "pending"] },
@@ -119,12 +119,12 @@ export class DisconnectService {
     if (number.status !== "active")
       throw new ConflictException("Number is not active");
     const account = await db
-      .collection<AccountRecord>("carrier_accounts")
-      .findOne({ _id: number.carrierAccountId, status: "active" });
+      .table<AccountRecord>("carrier_accounts")
+      .findOne({ id: number.carrierAccountId, status: "active" });
     if (!account) throw new NotFoundException("Carrier account not found");
     const carrier = await db
-      .collection<CarrierRecord>("carriers")
-      .findOne({ _id: account.carrierId });
+      .table<CarrierRecord>("carriers")
+      .findOne({ id: account.carrierId });
     if (!carrier) throw new NotFoundException("Carrier not found");
     if (carrier.code !== "mock")
       throw new ForbiddenException("Live billable disconnects are disabled");
@@ -136,38 +136,38 @@ export class DisconnectService {
     try {
       const request = await this.database.withTransaction(
         async (tx, session) => {
-          const id = new ObjectId();
+          const id = uuid();
           const job = await this.jobs.createInTransaction(tx, session, {
             type: "disconnect.execute",
-            payload: { requestId: id.toHexString() },
+            payload: { requestId: id },
             idempotencyKey: `disconnect:${idempotencyKey}`,
             maxAttempts: 5,
           });
           const record: DisconnectRecord = {
-            _id: id,
+            id: id,
             idempotencyKey,
             requestHash,
             phoneNumberId: numberId,
             e164: number.e164,
             carrierAccountId: number.carrierAccountId,
             actorId,
-            jobId: job._id,
+            jobId: job.id,
             status: "queued",
             createdAt: now,
             updatedAt: now,
           };
           await tx
-            .collection<DisconnectRecord>("disconnect_requests")
+            .table<DisconnectRecord>("disconnect_requests")
             .insertOne(record, { session });
           return record;
         },
       );
       return view(request);
     } catch (error) {
-      if (!(error instanceof MongoServerError && error.code === 11000))
+      if (!(error instanceof DatabaseError && error.code === "23505"))
         throw error;
       const existing = await db
-        .collection<DisconnectRecord>("disconnect_requests")
+        .table<DisconnectRecord>("disconnect_requests")
         .findOne({ idempotencyKey });
       if (existing) {
         if (existing.requestHash !== requestHash)
@@ -182,25 +182,25 @@ export class DisconnectService {
     }
   }
 
-  async get(id: ObjectId) {
+  async get(id: Id) {
     await this.database.ensureReady();
     const request = await this.database
-      .nativeDb()
-      .collection<DisconnectRecord>("disconnect_requests")
-      .findOne({ _id: id });
+      .sql()
+      .table<DisconnectRecord>("disconnect_requests")
+      .findOne({ id: id });
     if (!request) throw new NotFoundException("Disconnect request not found");
     return view(request);
   }
 
   async process(
-    id: ObjectId,
+    id: Id,
     context: JobHandlerContext,
     providerOverride?: CarrierOrder,
   ): Promise<{ status: string }> {
     await this.database.ensureReady();
-    const db = this.database.nativeDb();
-    const requests = db.collection<DisconnectRecord>("disconnect_requests");
-    const request = await requests.findOne({ _id: id });
+    const db = this.database.sql();
+    const requests = db.table<DisconnectRecord>("disconnect_requests");
+    const request = await requests.findOne({ id: id });
     if (!request) throw new NotFoundException("Disconnect request not found");
     if (["completed", "failed"].includes(request.status))
       return { status: request.status };
@@ -208,23 +208,23 @@ export class DisconnectService {
       return this.track(id, context);
     if (context.signal.aborted) throw new Error("Disconnect job interrupted");
     const account = await db
-      .collection<AccountRecord>("carrier_accounts")
-      .findOne({ _id: request.carrierAccountId, status: "active" });
+      .table<AccountRecord>("carrier_accounts")
+      .findOne({ id: request.carrierAccountId, status: "active" });
     if (!account) throw new NotFoundException("Carrier account not found");
     const carrier = await db
-      .collection<CarrierRecord>("carriers")
-      .findOne({ _id: account.carrierId });
+      .table<CarrierRecord>("carriers")
+      .findOne({ id: account.carrierId });
     if (!carrier) throw new NotFoundException("Carrier not found");
     if (carrier.code !== "mock")
       throw new ForbiddenException("Live billable disconnects are disabled");
     const reference: CarrierAccount = {
-      id: account._id.toHexString(),
+      id: account.id,
       carrier: carrier.code,
       nativeAccountId: account.externalAccountId,
       credentialRef: account.credentialRef,
     };
     await requests.updateOne(
-      { _id: id, status: { $in: ["queued", "retrying"] } },
+      { id: id, status: { $in: ["queued", "retrying"] } },
       { $set: { status: "running", updatedAt: new Date() } },
     );
     await context.reportProgress(10, "Requesting carrier disconnect");
@@ -238,7 +238,7 @@ export class DisconnectService {
         }));
     } catch (error) {
       await requests.updateOne(
-        { _id: id },
+        { id: id },
         {
           $set: {
             status:
@@ -257,12 +257,12 @@ export class DisconnectService {
     if (providerOrder.status === "pending") {
       await this.database.withTransaction(async (tx, session) => {
         const fresh = await tx
-          .collection<DisconnectRecord>("disconnect_requests")
-          .findOne({ _id: id }, { session });
+          .table<DisconnectRecord>("disconnect_requests")
+          .findOne({ id: id }, { session });
         if (!fresh) throw new NotFoundException("Disconnect request not found");
         const trackAttempt = (fresh.trackAttempt ?? 0) + 1;
-        await tx.collection<DisconnectRecord>("disconnect_requests").updateOne(
-          { _id: id },
+        await tx.table<DisconnectRecord>("disconnect_requests").updateOne(
+          { id: id },
           {
             $set: {
               status: "pending",
@@ -279,8 +279,8 @@ export class DisconnectService {
         )
           await this.jobs.createInTransaction(tx, session, {
             type: "disconnect.track",
-            payload: { requestId: id.toHexString() },
-            idempotencyKey: `disconnect-track:${id.toHexString()}:${trackAttempt}`,
+            payload: { requestId: id },
+            idempotencyKey: `disconnect-track:${id}:${trackAttempt}`,
             runAt: new Date(Date.now() + 60_000),
             maxAttempts: 5,
           });
@@ -289,7 +289,7 @@ export class DisconnectService {
     }
     if (providerOrder.status === "failed") {
       await requests.updateOne(
-        { _id: id },
+        { id: id },
         {
           $set: {
             status: "failed",
@@ -308,49 +308,49 @@ export class DisconnectService {
     await context.reportProgress(70, "Recording confirmed disconnect");
     await this.database.withTransaction(async (tx, session) => {
       const fresh = await tx
-        .collection<DisconnectRecord>("disconnect_requests")
-        .findOne({ _id: id }, { session });
+        .table<DisconnectRecord>("disconnect_requests")
+        .findOne({ id: id }, { session });
       if (!fresh || fresh.status === "completed") return;
       const number = await tx
-        .collection<PhoneNumberRecord>("phone_numbers")
-        .findOne({ _id: request.phoneNumberId }, { session });
+        .table<PhoneNumberRecord>("phone_numbers")
+        .findOne({ id: request.phoneNumberId }, { session });
       if (!number) throw new NotFoundException("Number not found");
       const now = new Date();
       if (number.status === "active") {
         await tx
-          .collection<PhoneNumberRecord>("phone_numbers")
+          .table<PhoneNumberRecord>("phone_numbers")
           .updateOne(
-            { _id: number._id },
+            { id: number.id },
             { $set: { status: "disconnected", updatedAt: now } },
             { session },
           );
         await tx
-          .collection<HoldingRecord>("number_holdings")
+          .table<HoldingRecord>("number_holdings")
           .updateOne(
-            { phoneNumberId: number._id, status: "active" },
+            { phoneNumberId: number.id, status: "active" },
             { $set: { status: "closed", endedAt: now } },
             { session },
           );
         const assignment = await tx
-          .collection("number_assignments")
-          .findOne({ phoneNumberId: number._id, active: true }, { session });
+          .table("number_assignments")
+          .findOne({ phoneNumberId: number.id, active: true }, { session });
         if (assignment)
           await this.assignments.unassignInTransaction(
             tx,
             session,
-            number._id,
+            number.id,
             request.actorId,
           );
         await this.audit.append(tx, session, {
           type: "number.disconnected",
           actorId: request.actorId,
-          phoneNumberId: number._id,
+          phoneNumberId: number.id,
           previous: { status: "active" },
           next: { status: "disconnected" },
         });
       }
-      await tx.collection<DisconnectRecord>("disconnect_requests").updateOne(
-        { _id: id },
+      await tx.table<DisconnectRecord>("disconnect_requests").updateOne(
+        { id: id },
         {
           $set: {
             status: "completed",
@@ -364,32 +364,29 @@ export class DisconnectService {
     return { status: "completed" };
   }
 
-  async track(
-    id: ObjectId,
-    context: JobHandlerContext,
-  ): Promise<{ status: string }> {
+  async track(id: Id, context: JobHandlerContext): Promise<{ status: string }> {
     await this.database.ensureReady();
-    const db = this.database.nativeDb();
+    const db = this.database.sql();
     const request = await db
-      .collection<DisconnectRecord>("disconnect_requests")
-      .findOne({ _id: id });
+      .table<DisconnectRecord>("disconnect_requests")
+      .findOne({ id: id });
     if (!request) throw new NotFoundException("Disconnect request not found");
     if (["completed", "failed"].includes(request.status))
       return { status: request.status };
     if (!request.nativeOrderId)
       throw new ConflictException("Carrier disconnect has not been accepted");
     const account = await db
-      .collection<AccountRecord>("carrier_accounts")
-      .findOne({ _id: request.carrierAccountId });
+      .table<AccountRecord>("carrier_accounts")
+      .findOne({ id: request.carrierAccountId });
     if (!account) throw new NotFoundException("Carrier account not found");
     const carrier = await db
-      .collection<CarrierRecord>("carriers")
-      .findOne({ _id: account.carrierId });
+      .table<CarrierRecord>("carriers")
+      .findOne({ id: account.carrierId });
     if (!carrier) throw new NotFoundException("Carrier not found");
     if (carrier.code !== "mock")
       throw new ForbiddenException("Live billable disconnects are disabled");
     const reference: CarrierAccount = {
-      id: account._id.toHexString(),
+      id: account.id,
       carrier: carrier.code,
       nativeAccountId: account.externalAccountId,
       credentialRef: account.credentialRef,

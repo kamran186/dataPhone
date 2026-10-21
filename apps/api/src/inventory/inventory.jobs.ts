@@ -1,5 +1,5 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
-import { ObjectId } from "mongodb";
+import { uuid } from "../database/query";
 import { JobStore } from "../jobs/job.store";
 import { JobWorker } from "../jobs/job.worker";
 import { InventoryService } from "./inventory.service";
@@ -15,16 +15,18 @@ export class InventoryJobs implements OnModuleInit, OnModuleDestroy {
   ) {
     worker.register("inventory.sync", async (payload, context) => {
       const accountId = payload.accountId;
-      if (typeof accountId !== "string" || !/^[a-f\d]{24}$/i.test(accountId))
+      if (
+        typeof accountId !== "string" ||
+        !/^[a-f\d]{8}-[a-f\d]{4}-[1-5][a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/i.test(
+          accountId,
+        )
+      )
         throw new Error("Invalid inventory sync account");
       await context.reportProgress(5, "Reading carrier inventory");
-      const run = await this.inventory.sync(
-        new ObjectId(accountId),
-        context.signal,
-      );
+      const run = await this.inventory.sync(uuid(accountId), context.signal);
       await context.reportProgress(95, "Reconciliation complete");
       return {
-        syncRunId: run._id.toHexString(),
+        syncRunId: run.id,
         seen: run.seen,
         created: run.created,
         updated: run.updated,

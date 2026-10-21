@@ -11,7 +11,9 @@ async function main(): Promise<void> {
       "DATAPHONE_BOOTSTRAP_EMAIL and DATAPHONE_BOOTSTRAP_PASSWORD are required",
     );
   }
-  const database = new DatabaseInfrastructure(loadConfig(process.env).mongoUri);
+  const database = new DatabaseInfrastructure(
+    loadConfig(process.env).databaseUrl,
+  );
   try {
     await database.connect();
     await bootstrapAdministrator(database, email, password);

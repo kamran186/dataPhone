@@ -1,11 +1,11 @@
 # System architecture
 
-DataPhone is an internal DID inventory and inbound porting application. The target deployment is a React browser app, a NestJS API and worker, and a self-hosted MongoDB replica set. The browser calls only the API; all permission decisions happen in NestJS.
+DataPhone is an internal DID inventory and inbound porting application. A React browser calls a NestJS modular API and worker backed by PostgreSQL 17. The browser has no carrier or database credentials. NestJS enforces permissions.
 
-Application use cases coordinate domain rules, repository ports, and carrier capability ports. TypeORM Mongo repositories handle ordinary CRUD. A native MongoDB gateway handles multi-document transactions, atomic job claims, change streams, GridFS, indexes, and advanced aggregation. A mutation that needs multiple documents, such as state plus audit plus outbox, performs **every write through one native client and session**. TypeORM's MongoDB query runner has no transaction support, so its calls cannot be mixed into that session.
+Application services coordinate domain rules, typed PostgreSQL repositories, and carrier capability interfaces. PostgreSQL tables hold business state with foreign keys and uniqueness constraints. Parameterized SQL joins power reporting. One transaction client commits related state, audit, and job events together. UUID strings identify records throughout the API.
 
-Carrier adapters normalize native statuses and errors. Only capabilities backed by provider contracts can be enabled. Persistent MongoDB jobs execute through bounded RxJS streams; change streams may wake workers and periodic scans recover missed work. SSE reads persisted job events and never executes a job.
+Carrier adapters normalize numbers and errors from Peerless SOAP, BulkVS REST, and Bandwidth v2 JSON. Live capabilities are inventory and available-number search. A provider advertises only implemented capabilities. The optional development mock also executes purchasing and ports.
 
-The system uses E.164 numbers, idempotency keys, append-only audit events, correlation IDs, encrypted porting data, and permission guards. Provider actions that could charge money, release a number, or submit a port require separate operational authorization. A single-node replica set permits transactions and change streams but has no node failure tolerance.
+Jobs persist claims, leases, progress, retry schedules, and ordered events. Workers scan every second and claim rows with `FOR UPDATE SKIP LOCKED`. Handlers are idempotent because a process crash can cause re-execution. SSE reads stored events and never executes a job. Port documents and sensitive account fields are encrypted before SQL persistence.
 
-Phase branches start from the latest verified `Prod`; after verification they are pushed, fast-forwarded into `Prod`, and pushed again before the next branch is created.
+See [database design](database.md), [security](security.md), and [carrier integration](../carriers/integration-requirements.md) for contracts and operational limits.

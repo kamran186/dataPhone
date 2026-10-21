@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { ClientSession, Document, ObjectId } from "mongodb";
+import { Row, SqlSession, uuid } from "./query";
 import {
   hashPassword,
   validatePassword,
@@ -12,10 +12,12 @@ import { seedCoreRoles } from "./seed";
 
 const DEMO = "dataphone-demo-v1";
 const date = (day: number) => new Date(Date.UTC(2026, 9, day, 14));
-const id = (name: string) =>
-  new ObjectId(
-    createHash("sha256").update(`${DEMO}:${name}`).digest("hex").slice(0, 24),
+const id = (name: string) => {
+  const hex = createHash("sha256").update(`${DEMO}:${name}`).digest("hex");
+  return uuid(
+    `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`,
   );
+};
 
 const users = [
   { email: "admin@email.com", role: "SUPER_ADMIN", name: "Demo Administrator" },
@@ -43,14 +45,14 @@ export async function seedDemoData(
   validatePassword(password);
   const crypto = new PortCrypto();
   await seedCoreRoles(database);
-  const db = database.nativeDb();
-  const carrier = await db.collection("carriers").findOne({ code: "mock" });
+  const db = database.sql();
+  const carrier = await db.table("carriers").findOne({ code: "mock" });
   if (!carrier) throw new Error("Local mock carrier is unavailable");
 
   // Existing records with these identities are never adopted or overwritten.
   for (const user of users) {
     const existing = await db
-      .collection("users")
+      .table("users")
       .findOne({ emailNormalized: user.email });
     if (existing && existing.demoSeed !== DEMO)
       throw new Error(
@@ -63,7 +65,7 @@ export async function seedDemoData(
       throw new Error(`Demo account has a different password: ${user.email}`);
   }
   for (const externalId of ["DEMO-ACME", "DEMO-NORTHSTAR", "DEMO-HARBOR"]) {
-    const existing = await db.collection("customers").findOne({ externalId });
+    const existing = await db.table("customers").findOne({ externalId });
     if (existing && existing.demoSeed !== DEMO)
       throw new Error(`Demo customer ID is already in use: ${externalId}`);
   }
@@ -72,7 +74,7 @@ export async function seedDemoData(
     (_, index) => `+120255501${String(index).padStart(2, "0")}`,
   );
   for (const e164 of numbers) {
-    const existing = await db.collection("phone_numbers").findOne({ e164 });
+    const existing = await db.table("phone_numbers").findOne({ e164 });
     if (existing && existing.demoSeed !== DEMO)
       throw new Error(`Demo number is already in use: ${e164}`);
   }
@@ -98,20 +100,20 @@ export async function seedDemoData(
   const upsert = async (
     collection: string,
     key: string,
-    record: Document,
-    session: ClientSession,
+    record: Row,
+    session: SqlSession,
   ) => {
-    const _id = id(key);
+    const recordId = id(key);
     const existing = await db
-      .collection(collection)
-      .findOne({ _id }, { session });
+      .table(collection)
+      .findOne({ id: recordId }, { session });
     if (existing && existing.demoSeed !== DEMO)
       throw new Error(`Demo ID collision in ${collection}: ${key}`);
     await db
-      .collection(collection)
+      .table(collection)
       .updateOne(
-        { _id },
-        { $setOnInsert: { _id, ...record, demoSeed: DEMO } },
+        { id: recordId },
+        { $setOnInsert: { id: recordId, ...record, demoSeed: DEMO } },
         { upsert: true, session },
       );
   };
@@ -157,7 +159,7 @@ export async function seedDemoData(
       "mock-account",
       {
         ...base,
-        carrierId: carrier._id,
+        carrierId: carrier.id,
         externalAccountId: "demo-mock-account",
         status: "active",
         lastSyncedAt: date(11),
@@ -171,7 +173,7 @@ export async function seedDemoData(
         {
           ...base,
           e164: numbers[index],
-          carrierId: carrier._id,
+          carrierId: carrier.id,
           carrierAccountId: accountId,
           carrierNumberId: `demo-native-${index}`,
           status:
@@ -507,7 +509,7 @@ export async function seedDemoData(
     await database.withTransaction(async (tx, session) => {
       if (
         await tx
-          .collection("number_events")
+          .table("number_events")
           .findOne({ "next.demoEvent": `${DEMO}:${event.key}` }, { session })
       )
         return;
@@ -519,15 +521,15 @@ export async function seedDemoData(
         previous: null,
         next: {
           demoEvent: `${DEMO}:${event.key}`,
-          customerId: event.customerId.toHexString(),
+          customerId: event.customerId,
         },
       });
     });
   }
 
-  // A real GridFS file keeps the port document download screen usable.
+  // An encrypted PostgreSQL document keeps the port document download screen usable.
   const documentId = id("port-document");
-  if (!(await db.collection("port_documents").findOne({ _id: documentId }))) {
+  if (!(await db.table("port_documents").findOne({ id: documentId }))) {
     const content = Buffer.from(
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==",
       "base64",
@@ -536,8 +538,8 @@ export async function seedDemoData(
       "demo-authorization.png",
       crypto.encrypt(content),
     );
-    await db.collection("port_documents").insertOne({
-      _id: documentId,
+    await db.table("port_documents").insertOne({
+      id: documentId,
       portRequestId: portIds[0],
       fileId,
       filename: "demo-authorization.png",

@@ -1,46 +1,51 @@
 import "reflect-metadata";
 import { randomUUID } from "node:crypto";
-import { ObjectId } from "mongodb";
+import { uuid } from "../src/database/query";
 import { loadConfig } from "../src/config/app-config";
 import { DatabaseService } from "../src/database/database.service";
 import { reportCsv, reportXlsx } from "../src/reporting/reporting.export";
 import { ReportingService } from "../src/reporting/reporting.service";
 
-const baseUrl = process.env.DATAPHONE_TEST_MONGO_URL;
+const baseUrl = process.env.DATAPHONE_TEST_DATABASE_URL;
 const integration = baseUrl ? describe : describe.skip;
 integration("operational reporting", () => {
   let database: DatabaseService;
   let reports: ReportingService;
   beforeAll(async () => {
-    const url = new URL(baseUrl ?? "mongodb://127.0.0.1:27017/");
-    url.pathname = `/dataphone_phase10_${randomUUID().replaceAll("-", "")}`;
+    const url = new URL(
+      baseUrl ?? "postgresql://dataphone:dataphone@127.0.0.1:54329/dataphone",
+    );
+    url.searchParams.set(
+      "schema",
+      `dataphone_phase10_${randomUUID().replaceAll("-", "")}`,
+    );
     database = new DatabaseService(
-      loadConfig({ MONGO_URI: url.toString(), NODE_ENV: "test" }),
+      loadConfig({ DATABASE_URL: url.toString(), NODE_ENV: "test" }),
     );
     await database.ensureReady();
     reports = new ReportingService(database);
-    const db = database.nativeDb();
-    const carrierId = new ObjectId(),
-      accountId = new ObjectId(),
-      customerId = new ObjectId();
-    const numberA = new ObjectId(),
-      numberB = new ObjectId(),
+    const db = database.sql();
+    const carrierId = uuid(),
+      accountId = uuid(),
+      customerId = uuid();
+    const numberA = uuid(),
+      numberB = uuid(),
       now = new Date();
     await db
-      .collection("carriers")
-      .insertOne({ _id: carrierId, code: "mock", displayName: "Mock" });
-    await db.collection("carrier_accounts").insertOne({
-      _id: accountId,
+      .table("carriers")
+      .insertOne({ id: carrierId, code: "mock", displayName: "Mock" });
+    await db.table("carrier_accounts").insertOne({
+      id: accountId,
       carrierId,
       externalAccountId: "sandbox",
       status: "active",
     });
     await db
-      .collection("customers")
-      .insertOne({ _id: customerId, name: "Acme", status: "active" });
-    await db.collection("phone_numbers").insertMany([
+      .table("customers")
+      .insertOne({ id: customerId, name: "Acme", status: "active" });
+    await db.table("phone_numbers").insertMany([
       {
-        _id: numberA,
+        id: numberA,
         e164: "+18043024183",
         status: "active",
         carrierId,
@@ -49,7 +54,7 @@ integration("operational reporting", () => {
         updatedAt: now,
       },
       {
-        _id: numberB,
+        id: numberB,
         e164: "+18043024184",
         status: "active",
         carrierId,
@@ -58,30 +63,30 @@ integration("operational reporting", () => {
         updatedAt: now,
       },
     ]);
-    await db.collection("number_assignments").insertOne({
-      _id: new ObjectId(),
+    await db.table("number_assignments").insertOne({
+      id: uuid(),
       phoneNumberId: numberA,
       customerId,
       active: true,
       startedAt: now,
     });
-    await db.collection("port_requests").insertOne({
-      _id: new ObjectId(),
+    await db.table("port_requests").insertOne({
+      id: uuid(),
       status: "DATE_CONFIRMED",
       numbers: ["+18043024185"],
       currentProvider: "Old Carrier",
       customerId,
       updatedAt: now,
     });
-    await db.collection("purchase_orders").insertOne({
-      _id: new ObjectId(),
+    await db.table("purchase_orders").insertOne({
+      id: uuid(),
       status: "pending",
       nativeIds: ["one"],
       customerId,
       createdAt: now,
     });
-    await db.collection("carrier_sync_runs").insertOne({
-      _id: new ObjectId(),
+    await db.table("carrier_sync_runs").insertOne({
+      id: uuid(),
       carrierAccountId: accountId,
       status: "failed",
       errorCode: "TIMEOUT",
@@ -89,11 +94,11 @@ integration("operational reporting", () => {
       finishedAt: now,
     });
     await db
-      .collection("background_jobs")
-      .insertOne({ _id: new ObjectId(), status: "failed" });
+      .table("background_jobs")
+      .insertOne({ id: uuid(), status: "failed" });
   });
   afterAll(async () => {
-    if (database?.isConnected()) await database.nativeDb().dropDatabase();
+    if (database?.isConnected()) await database.dropTestSchema();
     await database?.close();
   });
 

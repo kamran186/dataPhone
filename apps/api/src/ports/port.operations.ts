@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { ClientSession, Db, ObjectId } from "mongodb";
+import { Id, SqlDatabase, SqlSession, uuid } from "../database/query";
 import type {
   CarrierAccount,
   CarrierCode,
@@ -25,14 +25,14 @@ import { AuditService } from "../ownership/audit.service";
 import { PortRecord, PortStatus, portView } from "./port.requests";
 
 interface Account {
-  _id: ObjectId;
-  carrierId: ObjectId;
+  id: Id;
+  carrierId: Id;
   externalAccountId: string;
   credentialRef?: string;
   status: string;
 }
 interface Carrier {
-  _id: ObjectId;
+  id: Id;
   code: CarrierCode;
 }
 
@@ -47,20 +47,20 @@ export class PortOperations {
   ) {}
 
   private async reference(record: PortRecord) {
-    const db = this.database.nativeDb();
+    const db = this.database.sql();
     const account = await db
-      .collection<Account>("carrier_accounts")
-      .findOne({ _id: record.carrierAccountId, status: "active" });
+      .table<Account>("carrier_accounts")
+      .findOne({ id: record.carrierAccountId, status: "active" });
     if (!account)
       throw new NotFoundException("Active carrier account not found");
     const carrier = await db
-      .collection<Carrier>("carriers")
-      .findOne({ _id: account.carrierId });
+      .table<Carrier>("carriers")
+      .findOne({ id: account.carrierId });
     if (!carrier) throw new NotFoundException("Carrier not found");
     if (carrier.code !== "mock")
       throw new ForbiddenException("Live port submission is disabled");
     const reference: CarrierAccount = {
-      id: account._id.toHexString(),
+      id: account.id,
       carrier: carrier.code,
       nativeAccountId: account.externalAccountId,
       credentialRef: account.credentialRef,
@@ -68,12 +68,12 @@ export class PortOperations {
     return { account, carrier, reference };
   }
 
-  async submit(id: ObjectId, actorId: ObjectId, resubmit = false) {
+  async submit(id: Id, actorId: Id, resubmit = false) {
     await this.database.ensureReady();
-    const db = this.database.nativeDb();
+    const db = this.database.sql();
     const port = await db
-      .collection<PortRecord>("port_requests")
-      .findOne({ _id: id });
+      .table<PortRecord>("port_requests")
+      .findOne({ id: id });
     if (!port) throw new NotFoundException("Port request not found");
     if (port.status !== "DRAFT")
       throw new ConflictException("Only a draft port can be submitted");
@@ -84,30 +84,30 @@ export class PortOperations {
       throw new ConflictException("Carrier port submission is unavailable");
     if (
       !(await db
-        .collection("customers")
-        .findOne({ _id: port.customerId, status: "active" }))
+        .table("customers")
+        .findOne({ id: port.customerId, status: "active" }))
     )
       throw new ConflictException("Customer is not active");
     return this.database.withTransaction(async (tx, session) => {
       const current = await tx
-        .collection<PortRecord>("port_requests")
-        .findOne({ _id: id }, { session });
+        .table<PortRecord>("port_requests")
+        .findOne({ id: id }, { session });
       if (!current || current.status !== "DRAFT")
         throw new ConflictException("Port request changed");
       const job = await this.jobs.createInTransaction(tx, session, {
         type: "port.submit",
-        payload: { portId: id.toHexString() },
-        idempotencyKey: `port-submit:${id.toHexString()}:${current.version}`,
+        payload: { portId: id },
+        idempotencyKey: `port-submit:${id}:${current.version}`,
         maxAttempts: 5,
       });
       const now = new Date();
-      await tx.collection<PortRecord>("port_requests").updateOne(
-        { _id: id, version: current.version },
+      await tx.table<PortRecord>("port_requests").updateOne(
+        { id: id, version: current.version },
         {
           $set: {
             status: "SUBMITTED",
             nativeStatus: "QUEUED",
-            jobId: job._id,
+            jobId: job.id,
             actorId,
             updatedAt: now,
           },
@@ -122,7 +122,7 @@ export class PortOperations {
         { session },
       );
       await tx
-        .collection("port_request_numbers")
+        .table("port_request_numbers")
         .updateMany(
           { portRequestId: id },
           { $set: { status: "SUBMITTED" } },
@@ -143,7 +143,7 @@ export class PortOperations {
         ...current,
         status: "SUBMITTED",
         nativeStatus: "QUEUED",
-        jobId: job._id,
+        jobId: job.id,
         actorId,
         nativeOrderId: undefined,
         focDate: undefined,
@@ -155,15 +155,15 @@ export class PortOperations {
   }
 
   async process(
-    id: ObjectId,
+    id: Id,
     context: JobHandlerContext,
     override?: CarrierOrder,
   ): Promise<{ status: PortStatus }> {
     await this.database.ensureReady();
-    const db = this.database.nativeDb();
+    const db = this.database.sql();
     const port = await db
-      .collection<PortRecord>("port_requests")
-      .findOne({ _id: id });
+      .table<PortRecord>("port_requests")
+      .findOne({ id: id });
     if (!port) throw new NotFoundException("Port request not found");
     if (port.status === "COMPLETED" || port.status === "CANCELLED")
       return { status: port.status };
@@ -175,14 +175,14 @@ export class PortOperations {
     await context.reportProgress(10, "Submitting mock port order");
     const documentIds = (
       await db
-        .collection("port_documents")
-        .find({ portRequestId: id }, { projection: { _id: 1 } })
+        .table("port_documents")
+        .find({ portRequestId: id }, { projection: { id: 1 } })
         .toArray()
-    ).map((item) => item._id.toHexString());
+    ).map((item) => item.id);
     const result =
       override ??
       (await this.carriers.portSubmission(reference).submitPort(reference, {
-        reference: `${id.toHexString()}:${port.version}`,
+        reference: `${id}:${port.version}`,
         numbers: port.numbers,
         documentIds,
       }));
@@ -203,12 +203,12 @@ export class PortOperations {
         focDate || port.focDate ? "DATE_CONFIRMED" : "SUBMITTED";
       await this.database.withTransaction(async (tx, session) => {
         const current = await tx
-          .collection<PortRecord>("port_requests")
-          .findOne({ _id: id }, { session });
+          .table<PortRecord>("port_requests")
+          .findOne({ id: id }, { session });
         if (!current || current.status === "COMPLETED") return;
         const now = new Date();
-        await tx.collection<PortRecord>("port_requests").updateOne(
-          { _id: id },
+        await tx.table<PortRecord>("port_requests").updateOne(
+          { id: id },
           {
             $set: {
               status,
@@ -222,7 +222,7 @@ export class PortOperations {
           { session },
         );
         await tx
-          .collection("port_request_numbers")
+          .table("port_request_numbers")
           .updateMany(
             { portRequestId: id, status: { $ne: "COMPLETED" } },
             { $set: { status } },
@@ -246,8 +246,8 @@ export class PortOperations {
         if (this.carriers.capabilities(carrier.code).includes("order.status"))
           await this.jobs.createInTransaction(tx, session, {
             type: "port.track",
-            payload: { portId: id.toHexString() },
-            idempotencyKey: `port-track:${id.toHexString()}:${current.version + 1}`,
+            payload: { portId: id },
+            idempotencyKey: `port-track:${id}:${current.version + 1}`,
             runAt: new Date(Date.now() + 60_000),
             maxAttempts: 5,
           });
@@ -257,12 +257,12 @@ export class PortOperations {
     if (result.status === "failed") {
       await this.database.withTransaction(async (tx, session) => {
         const current = await tx
-          .collection<PortRecord>("port_requests")
-          .findOne({ _id: id }, { session });
+          .table<PortRecord>("port_requests")
+          .findOne({ id: id }, { session });
         if (!current || current.status === "REJECTED") return;
         const now = new Date();
-        await tx.collection<PortRecord>("port_requests").updateOne(
-          { _id: id },
+        await tx.table<PortRecord>("port_requests").updateOne(
+          { id: id },
           {
             $set: {
               status: "REJECTED",
@@ -276,7 +276,7 @@ export class PortOperations {
           { session },
         );
         await tx
-          .collection("port_request_numbers")
+          .table("port_request_numbers")
           .updateMany(
             { portRequestId: id },
             { $set: { status: "REJECTED" } },
@@ -304,50 +304,50 @@ export class PortOperations {
       );
     return this.database.withTransaction(async (tx, session) => {
       const current = await tx
-        .collection<PortRecord>("port_requests")
-        .findOne({ _id: id }, { session });
+        .table<PortRecord>("port_requests")
+        .findOne({ id: id }, { session });
       if (!current || current.status === "COMPLETED")
         return { status: "COMPLETED" as PortStatus };
       const account = await tx
-        .collection<Account>("carrier_accounts")
-        .findOne({ _id: current.carrierAccountId }, { session });
+        .table<Account>("carrier_accounts")
+        .findOne({ id: current.carrierAccountId }, { session });
       if (!account) throw new NotFoundException("Carrier account not found");
       let newlyCompleted = 0;
       for (const e164 of confirmed) {
         const line = await tx
-          .collection("port_request_numbers")
+          .table("port_request_numbers")
           .findOne({ portRequestId: id, e164 }, { session });
         if (line?.status === "COMPLETED") continue;
         const existing = await tx
-          .collection<PhoneNumberRecord>("phone_numbers")
+          .table<PhoneNumberRecord>("phone_numbers")
           .findOne({ e164 }, { session });
         const activeAssignment = existing
           ? await tx
-              .collection("number_assignments")
+              .table("number_assignments")
               .findOne(
-                { phoneNumberId: existing._id, active: true },
+                { phoneNumberId: existing.id, active: true },
                 { session },
               )
           : null;
         if (
           existing &&
-          (!existing.carrierAccountId.equals(account._id) ||
+          (existing.carrierAccountId !== account.id ||
             existing.status !== "active" ||
             activeAssignment)
         ) {
           await tx
-            .collection<ReconciliationIssueRecord>("reconciliation_issues")
+            .table<ReconciliationIssueRecord>("reconciliation_issues")
             .updateOne(
               {
-                carrierAccountId: account._id,
+                carrierAccountId: account.id,
                 e164,
                 type: "port_conflict",
                 status: "open",
               },
               {
                 $setOnInsert: {
-                  _id: new ObjectId(),
-                  phoneNumberId: existing._id,
+                  id: uuid(),
+                  phoneNumberId: existing.id,
                   detectedAt: new Date(),
                 },
               },
@@ -356,14 +356,14 @@ export class PortOperations {
           continue;
         }
         const now = new Date();
-        const numberId = existing?._id ?? new ObjectId();
+        const numberId = existing?.id ?? uuid();
         if (!existing) {
-          await tx.collection<PhoneNumberRecord>("phone_numbers").insertOne(
+          await tx.table<PhoneNumberRecord>("phone_numbers").insertOne(
             {
-              _id: numberId,
+              id: numberId,
               e164,
               carrierId: account.carrierId,
-              carrierAccountId: account._id,
+              carrierAccountId: account.id,
               carrierNumberId: e164,
               status: "active",
               firstSeenAt: now,
@@ -373,11 +373,11 @@ export class PortOperations {
             },
             { session },
           );
-          await tx.collection<HoldingRecord>("number_holdings").insertOne(
+          await tx.table<HoldingRecord>("number_holdings").insertOne(
             {
-              _id: new ObjectId(),
+              id: uuid(),
               phoneNumberId: numberId,
-              carrierAccountId: account._id,
+              carrierAccountId: account.id,
               status: "active",
               startedAt: now,
               createdAt: now,
@@ -391,7 +391,7 @@ export class PortOperations {
           customerId: current.customerId,
           phoneNumberId: numberId,
           previous: null,
-          next: { portRequestId: id.toHexString(), e164 },
+          next: { portRequestId: id, e164 },
         });
         await this.assignments.assignInTransaction(
           tx,
@@ -401,7 +401,7 @@ export class PortOperations {
           current.actorId,
         );
         await tx
-          .collection("port_request_numbers")
+          .table("port_request_numbers")
           .updateOne(
             { portRequestId: id, e164 },
             { $set: { status: "COMPLETED", completedAt: now } },
@@ -410,11 +410,8 @@ export class PortOperations {
         newlyCompleted++;
       }
       const completedCount = await tx
-        .collection("port_request_numbers")
-        .countDocuments(
-          { portRequestId: id, status: "COMPLETED" },
-          { session },
-        );
+        .table("port_request_numbers")
+        .count({ portRequestId: id, status: "COMPLETED" }, { session });
       const status: PortStatus =
         completedCount === current.numbers.length
           ? "COMPLETED"
@@ -422,8 +419,8 @@ export class PortOperations {
             ? "DATE_CONFIRMED"
             : "SUBMITTED";
       const now = new Date();
-      await tx.collection<PortRecord>("port_requests").updateOne(
-        { _id: id },
+      await tx.table<PortRecord>("port_requests").updateOne(
+        { id: id },
         {
           $set: {
             status,
@@ -444,8 +441,8 @@ export class PortOperations {
       )
         await this.jobs.createInTransaction(tx, session, {
           type: "port.track",
-          payload: { portId: id.toHexString() },
-          idempotencyKey: `port-track:${id.toHexString()}:${current.version + 1}`,
+          payload: { portId: id },
+          idempotencyKey: `port-track:${id}:${current.version + 1}`,
           runAt: new Date(Date.now() + 60_000),
           maxAttempts: 5,
         });
@@ -466,14 +463,14 @@ export class PortOperations {
   }
 
   async track(
-    id: ObjectId,
+    id: Id,
     context: JobHandlerContext,
   ): Promise<{ status: PortStatus }> {
     await this.database.ensureReady();
     const port = await this.database
-      .nativeDb()
-      .collection<PortRecord>("port_requests")
-      .findOne({ _id: id });
+      .sql()
+      .table<PortRecord>("port_requests")
+      .findOne({ id: id });
     if (!port) throw new NotFoundException("Port request not found");
     if (["COMPLETED", "CANCELLED", "REJECTED"].includes(port.status))
       return { status: port.status };
@@ -487,19 +484,19 @@ export class PortOperations {
   }
 
   private async record(
-    tx: Db,
-    session: ClientSession,
-    id: ObjectId,
-    customerId: ObjectId,
-    actorId: ObjectId,
+    tx: SqlDatabase,
+    session: SqlSession,
+    id: Id,
+    customerId: Id,
+    actorId: Id,
     type: string,
     previous: PortStatus,
     next: PortStatus,
     createdAt: Date,
   ) {
-    await tx.collection("port_events").insertOne(
+    await tx.table("port_events").insertOne(
       {
-        _id: new ObjectId(),
+        id: uuid(),
         portRequestId: id,
         type,
         actorId,
@@ -514,7 +511,7 @@ export class PortOperations {
       actorId,
       customerId,
       previous: { status: previous },
-      next: { portRequestId: id.toHexString(), status: next },
+      next: { portRequestId: id, status: next },
     });
   }
 }

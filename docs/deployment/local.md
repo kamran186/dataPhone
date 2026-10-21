@@ -1,19 +1,19 @@
 # Local deployment
 
-## Compose
+Use Node.js 24, pnpm 12.4.2, and PostgreSQL 17. `docker compose up --build -d` starts PostgreSQL, API, and the web application at http://localhost:8080. PostgreSQL is bound to 127.0.0.1:54328 and persists in the `postgres_data` volume. Local database defaults are development-only; set `DATAPHONE_DATABASE_PASSWORD` to change the password before first startup.
 
-Run `docker compose up --build -d` from the repository root, then open `http://localhost:8080`. The web port is bound to `127.0.0.1`; MongoDB and API stay on the private Compose network. `mongo-init` initializes a single-node replica set named `rs0` and exits. MongoDB data persists in the `mongo_data` volume.
+The first startup applies versioned SQL migrations. Demo mode creates sample users and workflows when `DATAPHONE_ENABLE_MOCK_CARRIER=true` and `DATAPHONE_SEED_DEMO=true`. The mock carrier is unavailable in production. See the README for demo accounts.
 
-Use `docker compose ps` to check service health. `GET http://localhost:8080/api/v1/health/live` checks the API process; `/api/v1/health/ready` checks MongoDB connectivity. `docker compose down` stops the stack while preserving the volume. `docker compose down -v` deletes the local MongoDB volume and should only be used when its data is disposable.
+For native development, copy `.env.example`, load the environment into the process, run `pnpm install`, then `pnpm build`. Set `DATABASE_URL` to a named PostgreSQL database. Run `pnpm --filter @dataphone/api db:init`, `db:seed`, and `db:bootstrap-admin` with the bootstrap email/password environment variables. Start the API with `pnpm --filter @dataphone/api start` and the web dev server using the web workspace's dev script.
 
-The local Compose stack uses development mode and creates an in-memory JWT signing key at each API start unless `JWT_SECRET` is supplied. Existing access tokens then expire on restart; refresh sessions can issue new access tokens. Set a stable secret of at least 32 bytes for any multi-instance or persistent deployment. Production mode refuses to start without it. Port requests and encrypted document upload also require `DATAPHONE_PORT_ENCRYPTION_KEY`, a stable base64-encoded 32-byte random key. Keep it in a secret manager, pass it to the API environment, and back it up separately; losing it makes stored port credentials and documents unreadable. The local web port stays bound to loopback. This stack is for local validation; a single-node replica set has no node failure tolerance.
+`GET /api/v1/health/live` checks the process; `/api/v1/health/ready` checks SQL connectivity and migrations. Use `docker compose ps` for container health. `docker compose down` preserves data. A volume reset discards all accounts and test records; the PostgreSQL switch intentionally starts with fresh data.
 
-To exercise simulated purchases, disconnects, and ports, set `DATAPHONE_ENABLE_MOCK_CARRIER=true` before starting Compose or the native API, then configure a mock carrier account. The mock is never enabled in production mode and never calls a provider. Its inventory is read from local active numbers, so mock purchases and completed ports remain visible after an API restart.
+For integration tests, provide an isolated database owned by the test user:
 
-Before the first sign-in, export `DATAPHONE_BOOTSTRAP_EMAIL` and `DATAPHONE_BOOTSTRAP_PASSWORD` in your shell. The password must be at least 12 characters. Then run `docker compose exec -e DATAPHONE_BOOTSTRAP_EMAIL -e DATAPHONE_BOOTSTRAP_PASSWORD api node apps/api/dist/auth/bootstrap-cli.js`. The command creates the first Super Admin only when the user collection is empty. It never prints the password. Remove the variables from your shell after use. No default administrator account is created.
+```sh
+DATAPHONE_TEST_DATABASE_URL=postgresql://dataphone:dataphone@127.0.0.1:54329/dataphone pnpm test
+```
 
-## Native development
+Each API suite creates a uniquely named `dataphone_*` schema and drops that schema on completion. The test role needs schema creation rights. The application never creates or drops a database. Use a dedicated test database. Integration suites are skipped when this variable is absent; a skipped run is not database verification.
 
-Use Node.js 24 and pnpm 12.4.2. Set `MONGO_URI` to a MongoDB URL with an explicit database name; an empty path is rejected. Set `CORS_ORIGIN` to the frontend origin and optionally `PORT` (default 3000). Copy `.env.example` for reference, but do not commit a real `.env` file. Build the shared package before starting API or web; `pnpm build` builds all workspaces in dependency order.
-
-After `pnpm build`, run `pnpm --filter @dataphone/api db:init` to apply the versioned core collections and indexes to the database named in `MONGO_URI`. Run `pnpm --filter @dataphone/api db:seed` to create or update the four initial roles and their permissions. Both commands can be repeated safely. The API readiness endpoint also applies the core schema when it first connects. To initialize the first administrator in native development, export `DATAPHONE_BOOTSTRAP_EMAIL` and `DATAPHONE_BOOTSTRAP_PASSWORD`, then run `pnpm --filter @dataphone/api db:bootstrap-admin` once. Keep `JWT_SECRET` out of the repository and set it before starting the API in production mode.
+Carrier secrets can be injected through the environment or an untracked `.env.carriers` file for Compose. See `docs/carriers/integration-requirements.md`. The application stores credential references, never carrier passwords.

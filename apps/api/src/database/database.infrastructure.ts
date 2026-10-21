@@ -1,137 +1,152 @@
-import { Readable } from "node:stream";
-import { pipeline } from "node:stream/promises";
-import {
-  ClientSession,
-  Db,
-  GridFSBucket,
-  MongoClient,
-  ObjectId,
-} from "mongodb";
-import { DataSource, MongoRepository, ObjectLiteral } from "typeorm";
-import { coreEntities } from "./entities";
-import { initializeCoreSchema } from "./schema";
-
+import { Pool, DatabaseError } from "pg";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { SqlDatabase, type Id, type Row } from "./query";
+import { migrate } from "./schema";
 export class ConcurrencyConflictError extends Error {
   constructor() {
     super("Record was changed by another operation");
-    this.name = "ConcurrencyConflictError";
   }
 }
-
-const appendOnlyCollections = new Set([
+const appendOnlyTables = new Set([
   "number_events",
   "job_events",
   "security_audit_events",
   "port_events",
 ]);
-
 export class DatabaseInfrastructure {
-  private readonly source: DataSource;
-  private readonly client: MongoClient;
-  private readonly databaseName: string;
-
-  constructor(uri: string) {
-    const parsed = new URL(uri);
-    this.databaseName = decodeURIComponent(parsed.pathname.slice(1));
-    if (!this.databaseName)
-      throw new Error("MongoDB database name is required");
-    this.source = new DataSource({
-      type: "mongodb",
-      url: uri,
-      database: this.databaseName,
-      entities: coreEntities,
-      synchronize: false,
+  private pool?: Pool;
+  private testSchema?: string;
+  private readonly transactionContext = new AsyncLocalStorage<SqlDatabase>();
+  constructor(private readonly url: string) {}
+  async connect() {
+    if (this.pool) return;
+    const url = new URL(this.url);
+    const schema = url.searchParams.get("schema");
+    url.searchParams.delete("schema");
+    if (
+      schema &&
+      (process.env.NODE_ENV !== "test" ||
+        !/^dataphone_[a-z0-9_]+$/.test(schema))
+    )
+      throw new Error("Only isolated test schemas are supported");
+    if (schema) {
+      const admin = new Pool({ connectionString: url.toString() });
+      try {
+        await admin.query(`CREATE SCHEMA IF NOT EXISTS "${schema}"`);
+      } finally {
+        await admin.end();
+      }
+      this.testSchema = schema;
+    }
+    const pool = new Pool({
+      connectionString: url.toString(),
+      connectionTimeoutMillis: 5000,
+      max: 12,
+      ...(schema ? { options: `-c search_path=${schema}` } : {}),
     });
-    this.client = new MongoClient(uri, { serverSelectionTimeoutMS: 1000 });
-  }
-
-  async connect(): Promise<void> {
-    await this.source.initialize();
+    pool.on("error", () => {
+      process.stderr.write(
+        '{"level":"error","event":"database_connection_lost"}\n',
+      );
+    });
     try {
-      await this.client.connect();
+      await pool.query("SELECT 1");
+      this.pool = pool;
     } catch (error) {
-      await this.source.destroy();
+      await pool.end();
       throw error;
     }
   }
-
-  isConnected(): boolean {
-    return this.source.isInitialized;
+  isConnected() {
+    return Boolean(this.pool);
   }
-
-  repository<T extends ObjectLiteral>(entity: string): MongoRepository<T> {
-    return this.source.getMongoRepository<T>(entity);
+  sql(): SqlDatabase {
+    const tx = this.transactionContext.getStore();
+    if (tx) return tx;
+    if (!this.pool) throw new Error("Database is not connected");
+    return new SqlDatabase(this.pool);
   }
-
-  nativeDb(): Db {
-    return this.client.db(this.databaseName);
+  async initializeSchema() {
+    await migrate(this.sql());
   }
-
-  async initializeSchema(): Promise<void> {
-    await initializeCoreSchema(this.nativeDb());
-  }
-
   async withTransaction<T>(
-    work: (db: Db, session: ClientSession) => Promise<T>,
+    work: (db: SqlDatabase, session: SqlDatabase) => Promise<T>,
   ): Promise<T> {
-    const session = this.client.startSession();
-    try {
-      return await session.withTransaction(() =>
-        work(this.nativeDb(), session),
-      );
-    } finally {
-      await session.endSession();
+    if (!this.pool) throw new Error("Database is not connected");
+    for (let attempt = 0; ; attempt++) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
+        const tx = new SqlDatabase(client, true);
+        const result = await this.transactionContext.run(tx, () =>
+          work(tx, tx),
+        );
+        await client.query("COMMIT");
+        return result;
+      } catch (error) {
+        await client.query("ROLLBACK");
+        if (
+          error instanceof DatabaseError &&
+          ["40001", "40P01"].includes(error.code ?? "") &&
+          attempt < 5
+        )
+          continue;
+        throw error;
+      } finally {
+        client.release();
+      }
     }
   }
-
-  async updateWithVersion(
-    collectionName: string,
-    id: ObjectId,
-    expectedVersion: number,
-    fields: Record<string, unknown>,
-  ): Promise<void> {
-    if (appendOnlyCollections.has(collectionName)) {
-      throw new Error(`${collectionName} is append-only`);
-    }
-    if ("_id" in fields || "version" in fields || "updatedAt" in fields)
+  async updateWithVersion(table: string, id: Id, version: number, fields: Row) {
+    if (appendOnlyTables.has(table)) throw new Error(`${table} is append-only`);
+    if ("id" in fields || "version" in fields || "updatedAt" in fields)
       throw new Error("Immutable or managed field cannot be updated");
-    const result = await this.nativeDb()
-      .collection(collectionName)
+    const result = await this.sql()
+      .table(table)
       .updateOne(
-        { _id: id, version: expectedVersion },
+        { id, version },
         {
           $set: fields,
           $inc: { version: 1 },
           $currentDate: { updatedAt: true },
         },
       );
-    if (result.matchedCount !== 1) throw new ConcurrencyConflictError();
+    if (!result.matchedCount) throw new ConcurrencyConflictError();
   }
-
-  gridFsBucket(): GridFSBucket {
-    return new GridFSBucket(this.nativeDb(), { bucketName: "documents" });
+  async uploadDocument(filename: string, content: Buffer): Promise<Id> {
+    if (content.length > 5 * 1024 * 1024 + 128)
+      throw new Error("Document exceeds storage limit");
+    return (
+      await this.sql().table("document_bytes").insertOne({ filename, content })
+    ).insertedId;
   }
-
-  async uploadDocument(filename: string, content: Buffer): Promise<ObjectId> {
-    const stream = this.gridFsBucket().openUploadStream(filename);
-    await pipeline(Readable.from([content]), stream);
-    return stream.id;
+  async downloadDocument(id: Id): Promise<Buffer> {
+    const row = await this.sql().table("document_bytes").findOne({ id });
+    if (!row) throw new Error("Document not found");
+    return row.content as Buffer;
   }
-
-  async downloadDocument(id: ObjectId): Promise<Buffer> {
-    const chunks: Buffer[] = [];
-    for await (const chunk of this.gridFsBucket().openDownloadStream(id)) {
-      chunks.push(Buffer.from(chunk));
-    }
-    return Buffer.concat(chunks);
+  async deleteDocument(id: Id) {
+    await this.sql().table("document_bytes").deleteOne({ id });
   }
-
-  async ping(): Promise<void> {
-    await this.nativeDb().command({ ping: 1 });
+  async ping() {
+    await this.sql().query("SELECT 1");
   }
-
-  async close(): Promise<void> {
-    await this.client.close();
-    if (this.source.isInitialized) await this.source.destroy();
+  async dropTestSchema() {
+    if (process.env.NODE_ENV !== "test" || !this.testSchema)
+      throw new Error("Refusing to drop a non-test schema");
+    await this.sql().query(`DROP SCHEMA "${this.testSchema}" CASCADE`);
+  }
+  async resetTestTables(names: string[]) {
+    if (process.env.NODE_ENV !== "test" || !this.testSchema)
+      throw new Error("Refusing to reset a non-test schema");
+    for (const name of names) this.sql().table(name);
+    await this.sql().query(
+      `TRUNCATE ${names.map((name) => `"${name}"`).join(",")} CASCADE`,
+    );
+  }
+  async close() {
+    const pool = this.pool;
+    this.pool = undefined;
+    await pool?.end();
   }
 }

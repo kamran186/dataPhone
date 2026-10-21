@@ -66,6 +66,14 @@ export function App() {
                   }
                 />
                 <Route
+                  path="search"
+                  element={
+                    <RequirePermission permission="inventory.view">
+                      <PurchasesPage readOnly />
+                    </RequirePermission>
+                  }
+                />
+                <Route
                   path="purchases"
                   element={
                     <RequirePermission permission="numbers.purchase">

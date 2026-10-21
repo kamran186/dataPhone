@@ -6,18 +6,22 @@ import {
   IsString,
   Matches,
 } from "class-validator";
-import { ObjectId } from "mongodb";
+import { uuid } from "../database/query";
 import { RequirePermissions } from "../auth/auth.decorators";
 import type { AuthRequest } from "../auth/auth.guard";
 import { AssignmentsService } from "./assignments.service";
-import { objectId } from "./ownership.http";
+import { recordId } from "./ownership.http";
 
 class AssignmentBody {
   @IsString()
-  @Matches(/^[a-f\d]{24}$/i)
+  @Matches(
+    /^[a-f\d]{8}-[a-f\d]{4}-[1-5][a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/i,
+  )
   numberId!: string;
   @IsString()
-  @Matches(/^[a-f\d]{24}$/i)
+  @Matches(
+    /^[a-f\d]{8}-[a-f\d]{4}-[1-5][a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/i,
+  )
   customerId!: string;
 }
 
@@ -25,16 +29,23 @@ class BulkBody {
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(100)
-  @Matches(/^[a-f\d]{24}$/i, { each: true })
+  @Matches(
+    /^[a-f\d]{8}-[a-f\d]{4}-[1-5][a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/i,
+    { each: true },
+  )
   numberIds!: string[];
   @IsString()
-  @Matches(/^[a-f\d]{24}$/i)
+  @Matches(
+    /^[a-f\d]{8}-[a-f\d]{4}-[1-5][a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/i,
+  )
   customerId!: string;
 }
 
 class UnassignBody {
   @IsString()
-  @Matches(/^[a-f\d]{24}$/i)
+  @Matches(
+    /^[a-f\d]{8}-[a-f\d]{4}-[1-5][a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/i,
+  )
   numberId!: string;
 }
 
@@ -46,35 +57,35 @@ export class AssignmentsController {
   @Post()
   assign(@Body() body: AssignmentBody, @Req() request: AuthRequest) {
     return this.assignments.assign(
-      objectId(body.numberId),
-      objectId(body.customerId),
-      new ObjectId(request.authUser!.id),
+      recordId(body.numberId),
+      recordId(body.customerId),
+      uuid(request.authUser!.id),
     );
   }
 
   @Post("bulk")
   bulk(@Body() body: BulkBody, @Req() request: AuthRequest) {
     return this.assignments.bulk(
-      body.numberIds.map(objectId),
-      objectId(body.customerId),
-      new ObjectId(request.authUser!.id),
+      body.numberIds.map(recordId),
+      recordId(body.customerId),
+      uuid(request.authUser!.id),
     );
   }
 
   @Post("transfer")
   transfer(@Body() body: AssignmentBody, @Req() request: AuthRequest) {
     return this.assignments.transfer(
-      objectId(body.numberId),
-      objectId(body.customerId),
-      new ObjectId(request.authUser!.id),
+      recordId(body.numberId),
+      recordId(body.customerId),
+      uuid(request.authUser!.id),
     );
   }
 
   @Post("unassign")
   unassign(@Body() body: UnassignBody, @Req() request: AuthRequest) {
     return this.assignments.unassign(
-      objectId(body.numberId),
-      new ObjectId(request.authUser!.id),
+      recordId(body.numberId),
+      uuid(request.authUser!.id),
     );
   }
 }

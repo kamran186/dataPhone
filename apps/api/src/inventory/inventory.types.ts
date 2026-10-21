@@ -1,15 +1,15 @@
-import type { ObjectId } from "mongodb";
+import { Id } from "../database/query";
 import type { CarrierCode } from "../carriers/domain";
 
 export interface CarrierRecord {
-  _id: ObjectId;
+  id: Id;
   code: CarrierCode;
   displayName: string;
 }
 
 export interface CarrierAccountRecord {
-  _id: ObjectId;
-  carrierId: ObjectId;
+  id: Id;
+  carrierId: Id;
   externalAccountId: string;
   credentialRef?: string;
   status: "active" | "disabled";
@@ -21,10 +21,10 @@ export interface CarrierAccountRecord {
 }
 
 export interface PhoneNumberRecord {
-  _id: ObjectId;
+  id: Id;
   e164: string;
-  carrierId: ObjectId;
-  carrierAccountId: ObjectId;
+  carrierId: Id;
+  carrierAccountId: Id;
   carrierNumberId: string;
   status: "active" | "missing" | "disconnected";
   firstSeenAt: Date;
@@ -34,9 +34,9 @@ export interface PhoneNumberRecord {
 }
 
 export interface HoldingRecord {
-  _id: ObjectId;
-  phoneNumberId: ObjectId;
-  carrierAccountId: ObjectId;
+  id: Id;
+  phoneNumberId: Id;
+  carrierAccountId: Id;
   status: "active" | "closed";
   startedAt: Date;
   endedAt?: Date;
@@ -44,8 +44,8 @@ export interface HoldingRecord {
 }
 
 export interface SyncRunRecord {
-  _id: ObjectId;
-  carrierAccountId: ObjectId;
+  id: Id;
+  carrierAccountId: Id;
   status: "running" | "succeeded" | "failed";
   startedAt: Date;
   finishedAt?: Date;
@@ -58,9 +58,9 @@ export interface SyncRunRecord {
 }
 
 export interface ReconciliationIssueRecord {
-  _id: ObjectId;
-  carrierAccountId: ObjectId;
-  phoneNumberId?: ObjectId;
+  id: Id;
+  carrierAccountId: Id;
+  phoneNumberId?: Id;
   e164: string;
   type:
     | "duplicate_carrier"

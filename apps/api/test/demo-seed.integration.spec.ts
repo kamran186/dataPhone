@@ -5,12 +5,17 @@ import { DatabaseInfrastructure } from "../src/database/database.infrastructure"
 import { seedDemoData } from "../src/database/demo-seed";
 import { PortCrypto } from "../src/ports/port.crypto";
 
-const baseUrl = process.env.DATAPHONE_TEST_MONGO_URL;
+const baseUrl = process.env.DATAPHONE_TEST_DATABASE_URL;
 const integration = baseUrl ? describe : describe.skip;
 
 integration("development demo seed", () => {
-  const url = new URL(baseUrl ?? "mongodb://127.0.0.1:27017/");
-  url.pathname = `/dataphone_demo_test_${randomUUID().replaceAll("-", "")}`;
+  const url = new URL(
+    baseUrl ?? "postgresql://dataphone:dataphone@127.0.0.1:54329/dataphone",
+  );
+  url.searchParams.set(
+    "schema",
+    `dataphone_demo_test_${randomUUID().replaceAll("-", "")}`,
+  );
   const database = new DatabaseInfrastructure(url.toString());
   const previousMock = process.env.DATAPHONE_ENABLE_MOCK_CARRIER;
   const previousKey = process.env.DATAPHONE_PORT_ENCRYPTION_KEY;
@@ -25,7 +30,7 @@ integration("development demo seed", () => {
 
   afterAll(async () => {
     if (database.isConnected()) {
-      await database.nativeDb().dropDatabase();
+      await database.dropTestSchema();
       await database.close();
     }
     if (previousMock === undefined)
@@ -38,7 +43,7 @@ integration("development demo seed", () => {
 
   it("creates usable sample records and remains idempotent", async () => {
     await seedDemoData(database, "Admin@123456");
-    const db = database.nativeDb();
+    const db = database.sql();
     const counts = Object.fromEntries(
       await Promise.all(
         [
@@ -53,10 +58,7 @@ integration("development demo seed", () => {
           "carrier_sync_runs",
           "reconciliation_issues",
           "port_documents",
-        ].map(
-          async (name) =>
-            [name, await db.collection(name).countDocuments()] as const,
-        ),
+        ].map(async (name) => [name, await db.table(name).count()] as const),
       ),
     );
     expect(counts).toMatchObject({
@@ -72,7 +74,7 @@ integration("development demo seed", () => {
       reconciliation_issues: 2,
       port_documents: 1,
     });
-    const roles = await db.collection("users").find().toArray();
+    const roles = await db.table("users").find().toArray();
     expect(new Set(roles.flatMap((user) => user.roleKeys as string[]))).toEqual(
       new Set([
         "SUPER_ADMIN",
@@ -84,7 +86,7 @@ integration("development demo seed", () => {
     expect(
       await verifyPassword("Admin@123456", roles[0].passwordHash as string),
     ).toBe(true);
-    const document = await db.collection("port_documents").findOne();
+    const document = await db.table("port_documents").findOne();
     expect(document).not.toBeNull();
     const sealed = await database.downloadDocument(document!.fileId);
     expect(new PortCrypto().decrypt(sealed).subarray(0, 8)).toEqual(
@@ -92,11 +94,9 @@ integration("development demo seed", () => {
     );
     await seedDemoData(database, "Admin@123456");
     for (const [name, count] of Object.entries(counts))
-      expect(await db.collection(name).countDocuments()).toBe(count);
+      expect(await db.table(name).count()).toBe(count);
     expect(
-      await db
-        .collection("audit_chain_heads")
-        .findOne({ _id: "global" as never }),
+      await db.table("audit_chain_heads").findOne({ id: "global" as never }),
     ).toMatchObject({ sequence: 3 });
     const previousEnvironment = process.env.NODE_ENV;
     process.env.NODE_ENV = "production";

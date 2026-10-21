@@ -1,6 +1,6 @@
 export interface AppConfig {
   port: number;
-  mongoUri: string;
+  databaseUrl: string;
   corsOrigin: string;
   environment: "development" | "test" | "production";
   jwtSecret?: string;
@@ -9,15 +9,15 @@ export interface AppConfig {
 export const APP_CONFIG = Symbol("APP_CONFIG");
 
 export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
-  const mongoUri = env.MONGO_URI;
-  if (!mongoUri) throw new Error("MONGO_URI is required");
-  const parsed = new URL(mongoUri);
+  const databaseUrl = env.DATABASE_URL;
+  if (!databaseUrl) throw new Error("DATABASE_URL is required");
+  const parsed = new URL(databaseUrl);
   if (
-    !["mongodb:", "mongodb+srv:"].includes(parsed.protocol) ||
+    !["postgresql:", "postgres:"].includes(parsed.protocol) ||
     parsed.pathname.length < 2
   ) {
     throw new Error(
-      "MONGO_URI must be a MongoDB URL with an explicit database name",
+      "DATABASE_URL must be a PostgreSQL URL with an explicit database name",
     );
   }
   const port = Number(env.PORT ?? "3000");
@@ -50,7 +50,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
     throw new Error("CORS_ORIGIN must be HTTP or HTTPS");
   return {
     port,
-    mongoUri,
+    databaseUrl,
     corsOrigin: origin.origin,
     environment: environment as AppConfig["environment"],
     jwtSecret,

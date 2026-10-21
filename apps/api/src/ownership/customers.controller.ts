@@ -18,11 +18,11 @@ import {
   Min,
   MinLength,
 } from "class-validator";
-import { ObjectId } from "mongodb";
+import { uuid } from "../database/query";
 import { RequirePermissions } from "../auth/auth.decorators";
 import type { AuthRequest } from "../auth/auth.guard";
 import { CustomersService } from "./customers.service";
-import { objectId, pageQuery } from "./ownership.http";
+import { recordId, pageQuery } from "./ownership.http";
 
 class CreateCustomerBody {
   @IsString()
@@ -61,13 +61,13 @@ export class CustomersController {
   @Post()
   @RequirePermissions("customers.manage")
   create(@Body() body: CreateCustomerBody, @Req() request: AuthRequest) {
-    return this.customers.create(body, new ObjectId(request.authUser!.id));
+    return this.customers.create(body, uuid(request.authUser!.id));
   }
 
   @Get(":id")
   @RequirePermissions("customers.view")
   get(@Param("id") raw: string) {
-    return this.customers.get(objectId(raw));
+    return this.customers.get(recordId(raw));
   }
 
   @Patch(":id")
@@ -78,9 +78,9 @@ export class CustomersController {
     @Req() request: AuthRequest,
   ) {
     return this.customers.update(
-      objectId(raw),
+      recordId(raw),
       body,
-      new ObjectId(request.authUser!.id),
+      uuid(request.authUser!.id),
     );
   }
 
@@ -90,6 +90,6 @@ export class CustomersController {
     @Param("id") raw: string,
     @Query() query: Record<string, string | undefined>,
   ) {
-    return this.customers.numbers(objectId(raw), pageQuery(query));
+    return this.customers.numbers(recordId(raw), pageQuery(query));
   }
 }

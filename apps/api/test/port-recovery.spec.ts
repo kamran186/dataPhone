@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import { ObjectId } from "mongodb";
+import { uuid } from "../src/database/query";
 import type { DatabaseService } from "../src/database/database.service";
 import type { JobStore } from "../src/jobs/job.store";
 import type { JobWorker } from "../src/jobs/job.worker";
@@ -7,16 +7,16 @@ import { PortJobs } from "../src/ports/port.jobs";
 import type { PortOperations } from "../src/ports/port.operations";
 
 it("requeues submitted ports after restart, with or without a native order ID", async () => {
-  const first = new ObjectId(),
-    second = new ObjectId();
+  const first = uuid(),
+    second = uuid();
   const toArray = async () => [
-    { _id: first },
-    { _id: second, nativeOrderId: "native-1" },
+    { id: first },
+    { id: second, nativeOrderId: "native-1" },
   ];
   const database = {
     ensureReady: async () => undefined,
-    nativeDb: () => ({
-      collection: () => ({ find: () => ({ limit: () => ({ toArray }) }) }),
+    sql: () => ({
+      table: () => ({ find: () => ({ limit: () => ({ toArray }) }) }),
     }),
   } as unknown as DatabaseService;
   const calls: Array<{
@@ -39,13 +39,13 @@ it("requeues submitted ports after restart, with or without a native order ID", 
   expect(calls).toContainEqual(
     expect.objectContaining({
       type: "port.submit",
-      payload: { portId: first.toHexString() },
+      payload: { portId: first },
     }),
   );
   expect(calls).toContainEqual(
     expect.objectContaining({
       type: "port.track",
-      payload: { portId: second.toHexString() },
+      payload: { portId: second },
     }),
   );
   expect(calls[0].idempotencyKey).not.toBe(calls[1].idempotencyKey);

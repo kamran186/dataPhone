@@ -6,21 +6,25 @@ import {
   IsString,
   Matches,
 } from "class-validator";
-import { ObjectId } from "mongodb";
+import { uuid } from "../database/query";
 import { RequirePermissions } from "../auth/auth.decorators";
 import type { AuthRequest } from "../auth/auth.guard";
 import type { CarrierCode } from "../carriers/domain";
-import { objectId } from "../ownership/ownership.http";
+import { recordId } from "../ownership/ownership.http";
 import { DisconnectService } from "./disconnect.service";
 import { PurchaseOrdersService } from "./purchase-orders.service";
 import { PurchasesService } from "./purchases.service";
 
 class PurchaseBody {
   @IsString()
-  @Matches(/^[a-f\d]{24}$/i)
+  @Matches(
+    /^[a-f\d]{8}-[a-f\d]{4}-[1-5][a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/i,
+  )
   carrierAccountId!: string;
   @IsString()
-  @Matches(/^[a-f\d]{24}$/i)
+  @Matches(
+    /^[a-f\d]{8}-[a-f\d]{4}-[1-5][a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/i,
+  )
   customerId!: string;
   @IsArray()
   @ArrayMinSize(1)
@@ -50,6 +54,7 @@ export class PurchasesController {
   ) {}
 
   @Get("search")
+  @RequirePermissions("inventory.view")
   search(@Query() raw: Record<string, string | undefined>) {
     return this.searchService.search({
       areaCode: raw.areaCode,
@@ -65,12 +70,12 @@ export class PurchasesController {
   create(@Body() body: PurchaseBody, @Req() request: AuthRequest) {
     return this.orders.create(
       {
-        carrierAccountId: objectId(body.carrierAccountId),
-        customerId: objectId(body.customerId),
+        carrierAccountId: recordId(body.carrierAccountId),
+        customerId: recordId(body.customerId),
         nativeIds: body.nativeIds,
         idempotencyKey: body.idempotencyKey,
       },
-      new ObjectId(request.authUser!.id),
+      uuid(request.authUser!.id),
     );
   }
 
@@ -84,7 +89,7 @@ export class PurchasesController {
 
   @Get(":id")
   get(@Param("id") raw: string) {
-    return this.orders.get(objectId(raw));
+    return this.orders.get(recordId(raw));
   }
 }
 
@@ -100,10 +105,10 @@ export class NumberDisconnectController {
     @Req() request: AuthRequest,
   ) {
     return this.disconnects.create(
-      objectId(raw),
+      recordId(raw),
       body.confirmE164,
       body.idempotencyKey,
-      new ObjectId(request.authUser!.id),
+      uuid(request.authUser!.id),
     );
   }
 }
@@ -115,6 +120,6 @@ export class DisconnectsController {
 
   @Get(":id")
   get(@Param("id") raw: string) {
-    return this.disconnects.get(objectId(raw));
+    return this.disconnects.get(recordId(raw));
   }
 }

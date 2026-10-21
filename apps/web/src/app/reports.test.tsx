@@ -5,7 +5,7 @@ import { useAuthStore } from "./model/use-auth-store";
 import { useShellStore } from "./model/use-shell-store";
 
 const user = {
-  id: "507f1f77bcf86cd799439011",
+  id: "ac902665-6c90-55b4-b4ab-36c1e3d87cd8",
   email: "viewer@example.test",
   roleKeys: ["VIEWER"],
   permissions: ["reports.view", "inventory.view"],

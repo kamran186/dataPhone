@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import { randomUUID } from "node:crypto";
-import { ObjectId } from "mongodb";
+import { Id, uuid } from "../src/database/query";
 import type { INestApplication } from "@nestjs/common";
 import ExcelJS from "exceljs";
 import { bootstrapAdministrator } from "../src/auth/bootstrap-admin";
@@ -14,13 +14,13 @@ import { loadConfig } from "../src/config/app-config";
 import { DatabaseService } from "../src/database/database.service";
 import { InventoryService } from "../src/inventory/inventory.service";
 
-const baseUrl = process.env.DATAPHONE_TEST_MONGO_URL;
+const baseUrl = process.env.DATAPHONE_TEST_DATABASE_URL;
 const integration = baseUrl ? describe : describe.skip;
 
 integration("carrier inventory synchronization", () => {
   let database: DatabaseService;
-  let carrierId: ObjectId;
-  let accountId: ObjectId;
+  let carrierId: Id;
+  let accountId: Id;
   let testUri: string;
   const first = "+18043024183";
   const second = "+18042121778";
@@ -31,21 +31,26 @@ integration("carrier inventory synchronization", () => {
   }
 
   beforeAll(async () => {
-    const url = new URL(baseUrl ?? "mongodb://127.0.0.1:27017/");
-    url.pathname = `/dataphone_phase6_test_${randomUUID().replaceAll("-", "")}`;
+    const url = new URL(
+      baseUrl ?? "postgresql://dataphone:dataphone@127.0.0.1:54329/dataphone",
+    );
+    url.searchParams.set(
+      "schema",
+      `dataphone_phase6_test_${randomUUID().replaceAll("-", "")}`,
+    );
     testUri = url.toString();
     database = new DatabaseService(
-      loadConfig({ MONGO_URI: testUri, NODE_ENV: "test" }),
+      loadConfig({ DATABASE_URL: testUri, NODE_ENV: "test" }),
     );
     await database.ensureReady();
-    carrierId = new ObjectId();
-    accountId = new ObjectId();
+    carrierId = uuid();
+    accountId = uuid();
     await database
-      .nativeDb()
-      .collection("carriers")
-      .insertOne({ _id: carrierId, code: "mock", displayName: "Mock fixture" });
-    await database.nativeDb().collection("carrier_accounts").insertOne({
-      _id: accountId,
+      .sql()
+      .table("carriers")
+      .insertOne({ id: carrierId, code: "mock", displayName: "Mock fixture" });
+    await database.sql().table("carrier_accounts").insertOne({
+      id: accountId,
       carrierId,
       externalAccountId: "fixture",
       status: "active",
@@ -55,18 +60,17 @@ integration("carrier inventory synchronization", () => {
   });
 
   beforeEach(async () => {
-    for (const name of [
+    await database.resetTestTables([
       "phone_numbers",
       "number_holdings",
       "number_assignments",
       "reconciliation_issues",
       "carrier_sync_runs",
-    ])
-      await database.nativeDb().collection(name).deleteMany({});
+    ]);
   });
 
   afterAll(async () => {
-    if (database?.isConnected()) await database.nativeDb().dropDatabase();
+    if (database?.isConnected()) await database.dropTestSchema();
     await database?.close();
   });
 
@@ -84,65 +88,62 @@ integration("carrier inventory synchronization", () => {
       created: 0,
       updated: 2,
     });
-    expect(
-      await database.nativeDb().collection("phone_numbers").countDocuments(),
-    ).toBe(2);
-    expect(
-      await database.nativeDb().collection("number_holdings").countDocuments(),
-    ).toBe(2);
+    expect(await database.sql().table("phone_numbers").count()).toBe(2);
+    expect(await database.sql().table("number_holdings").count()).toBe(2);
   });
 
   it("records missing carrier numbers without changing customer assignment", async () => {
     await service([first, second]).sync(accountId);
     const number = await database
-      .nativeDb()
-      .collection("phone_numbers")
+      .sql()
+      .table("phone_numbers")
       .findOne({ e164: second });
-    await database.nativeDb().collection("number_assignments").insertOne({
-      phoneNumberId: number!._id,
-      customerId: new ObjectId(),
+    const assignedCustomer = uuid();
+    await database
+      .sql()
+      .table("customers")
+      .insertOne({ id: assignedCustomer, name: "Inventory customer" });
+    await database.sql().table("number_assignments").insertOne({
+      phoneNumberId: number!.id,
+      customerId: assignedCustomer,
       active: true,
     });
     const run = await service([first]).sync(accountId);
     expect(run.missing).toBe(1);
     expect(
-      (
-        await database
-          .nativeDb()
-          .collection("phone_numbers")
-          .findOne({ e164: second })
-      )?.status,
+      (await database.sql().table("phone_numbers").findOne({ e164: second }))
+        ?.status,
     ).toBe("missing");
     expect(
       await database
-        .nativeDb()
-        .collection("number_assignments")
-        .countDocuments({ phoneNumberId: number!._id, active: true }),
+        .sql()
+        .table("number_assignments")
+        .count({ phoneNumberId: number!.id, active: true }),
     ).toBe(1);
     expect(
       await database
-        .nativeDb()
-        .collection("number_holdings")
-        .countDocuments({ phoneNumberId: number!._id, status: "closed" }),
+        .sql()
+        .table("number_holdings")
+        .count({ phoneNumberId: number!.id, status: "closed" }),
     ).toBe(1);
     expect(
       await database
-        .nativeDb()
-        .collection("reconciliation_issues")
-        .countDocuments({ e164: second, status: "open" }),
+        .sql()
+        .table("reconciliation_issues")
+        .count({ e164: second, status: "open" }),
     ).toBe(1);
     await service([first, second]).sync(accountId);
     expect(
       await database
-        .nativeDb()
-        .collection("number_holdings")
-        .countDocuments({ phoneNumberId: number!._id }),
+        .sql()
+        .table("number_holdings")
+        .count({ phoneNumberId: number!.id }),
     ).toBe(2);
     expect(
       await database
-        .nativeDb()
-        .collection("reconciliation_issues")
-        .countDocuments({ e164: second, status: "open" }),
+        .sql()
+        .table("reconciliation_issues")
+        .count({ e164: second, status: "open" }),
     ).toBe(0);
   });
 
@@ -166,19 +167,10 @@ integration("carrier inventory synchronization", () => {
       "carrier unavailable",
     );
     expect(
-      (
-        await database
-          .nativeDb()
-          .collection("phone_numbers")
-          .findOne({ e164: first })
-      )?.status,
+      (await database.sql().table("phone_numbers").findOne({ e164: first }))
+        ?.status,
     ).toBe("active");
-    expect(
-      await database
-        .nativeDb()
-        .collection("reconciliation_issues")
-        .countDocuments(),
-    ).toBe(0);
+    expect(await database.sql().table("reconciliation_issues").count()).toBe(0);
   });
 
   it("keeps inventory unchanged when a later carrier page fails", async () => {
@@ -205,29 +197,46 @@ integration("carrier inventory synchronization", () => {
       "second page unavailable",
     );
     expect(
-      await database
-        .nativeDb()
-        .collection("phone_numbers")
-        .countDocuments({ status: "active" }),
+      await database.sql().table("phone_numbers").count({ status: "active" }),
     ).toBe(2);
+    expect(await database.sql().table("reconciliation_issues").count()).toBe(0);
+  });
+
+  it("rejects a truncated snapshot without marking existing inventory missing", async () => {
+    await service([first, second]).sync(accountId);
+    const registry = new CarrierRegistry([
+      {
+        code: "mock",
+        capabilities: new Set(["inventory.list"] as const),
+        inventory: {
+          listInventory: async () => ({
+            numbers: [{ e164: first, nativeId: first, status: "active" }],
+            totalCount: 2,
+          }),
+        },
+      },
+    ]);
+    await expect(
+      new InventoryService(database, registry as CarrierRegistryService).sync(
+        accountId,
+      ),
+    ).rejects.toThrow("incomplete");
     expect(
-      await database
-        .nativeDb()
-        .collection("reconciliation_issues")
-        .countDocuments(),
-    ).toBe(0);
+      await database.sql().table("phone_numbers").count({ status: "active" }),
+    ).toBe(2);
+    expect(await database.sql().table("reconciliation_issues").count()).toBe(0);
   });
 
   it("merges distinct carrier inventories and flags duplicate E.164 identities", async () => {
     await service([first]).sync(accountId);
     const bandwidth = await database
-      .nativeDb()
-      .collection("carriers")
+      .sql()
+      .table("carriers")
       .findOne({ code: "bandwidth" });
-    const otherAccount = new ObjectId();
-    await database.nativeDb().collection("carrier_accounts").insertOne({
-      _id: otherAccount,
-      carrierId: bandwidth!._id,
+    const otherAccount = uuid();
+    await database.sql().table("carrier_accounts").insertOne({
+      id: otherAccount,
+      carrierId: bandwidth!.id,
       externalAccountId: "fixture-two",
       status: "active",
       createdAt: new Date(),
@@ -254,10 +263,7 @@ integration("carrier inventory synchronization", () => {
     expect(result.issues).toBe(1);
     expect(result.created).toBe(1);
     expect(
-      await database
-        .nativeDb()
-        .collection("phone_numbers")
-        .countDocuments({ e164: first }),
+      await database.sql().table("phone_numbers").count({ e164: first }),
     ).toBe(1);
     expect(
       (await other.listNumbers({ carrier: "bandwidth" })).items.map(
@@ -266,27 +272,27 @@ integration("carrier inventory synchronization", () => {
     ).toEqual([second]);
     expect(
       await database
-        .nativeDb()
-        .collection("reconciliation_issues")
-        .countDocuments({ e164: first, type: "duplicate_carrier" }),
+        .sql()
+        .table("reconciliation_issues")
+        .count({ e164: first, type: "duplicate_carrier" }),
     ).toBe(1);
   });
 
   it("searches partial numbers, customer names, filters, and pages", async () => {
     await service([first, second]).sync(accountId);
     const number = await database
-      .nativeDb()
-      .collection("phone_numbers")
+      .sql()
+      .table("phone_numbers")
       .findOne({ e164: second });
-    const customerId = new ObjectId();
-    await database.nativeDb().collection("customers").insertOne({
-      _id: customerId,
+    const customerId = uuid();
+    await database.sql().table("customers").insertOne({
+      id: customerId,
       name: "Acme West",
       externalId: "acme-west",
     });
-    await database.nativeDb().collection("number_assignments").insertOne({
-      _id: new ObjectId(),
-      phoneNumberId: number!._id,
+    await database.sql().table("number_assignments").insertOne({
+      id: uuid(),
+      phoneNumberId: number!.id,
       customerId,
       active: true,
     });
@@ -322,10 +328,10 @@ integration("carrier inventory synchronization", () => {
   it("serves protected inventory, CSV and XLSX exports, and reconciliation issues", async () => {
     await service([first, second]).sync(accountId);
     await service([first]).sync(accountId);
-    const previousUri = process.env.MONGO_URI;
+    const previousUri = process.env.DATABASE_URL;
     const previousSecret = process.env.JWT_SECRET;
     const previousWorker = process.env.DATAPHONE_JOB_WORKER_DISABLED;
-    process.env.MONGO_URI = testUri;
+    process.env.DATABASE_URL = testUri;
     process.env.JWT_SECRET = "phase6-test-secret-with-at-least-32-bytes";
     process.env.DATAPHONE_JOB_WORKER_DISABLED = "true";
     let app: INestApplication | undefined;
@@ -354,9 +360,9 @@ integration("carrier inventory synchronization", () => {
       expect(list.status).toBe(200);
       expect(((await list.json()) as { total: number }).total).toBe(1);
       const detailId = (await database
-        .nativeDb()
-        .collection("phone_numbers")
-        .findOne({ e164: second }))!._id.toHexString();
+        .sql()
+        .table("phone_numbers")
+        .findOne({ e164: second }))!.id;
       const detail = await fetch(`${root}/numbers/${detailId}`, { headers });
       expect(detail.status).toBe(200);
       expect(
@@ -386,32 +392,31 @@ integration("carrier inventory synchronization", () => {
       const carriers = await fetch(`${root}/carriers`, { headers });
       expect(carriers.status).toBe(200);
       expect(((await carriers.json()) as unknown[]).length).toBeGreaterThan(0);
-      const configured = await fetch(
-        `${root}/carriers/${carrierId.toHexString()}/accounts`,
-        {
-          method: "POST",
-          headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            externalAccountId: "new-account",
-            credentialRef: "BANDWIDTH_TOKEN",
-          }),
-        },
-      );
+      const configured = await fetch(`${root}/carriers/${carrierId}/accounts`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          externalAccountId: "new-account",
+          credentialRef: "BANDWIDTH_TOKEN",
+        }),
+      });
       expect(configured.status).toBe(201);
       const configuredBody = (await configured.json()) as { id: string };
-      expect(configuredBody.id).toMatch(/^[a-f\d]{24}$/);
-      const queued = await fetch(
-        `${root}/carriers/${accountId.toHexString()}/sync`,
-        { method: "POST", headers },
+      expect(configuredBody.id).toMatch(
+        /^[a-f\d]{8}-[a-f\d]{4}-[1-5][a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/,
       );
+      const queued = await fetch(`${root}/carriers/${accountId}/sync`, {
+        method: "POST",
+        headers,
+      });
       expect(queued.status).toBe(201);
       expect(((await queued.json()) as { jobId: string }).jobId).toMatch(
-        /^[a-f\d]{24}$/,
+        /^[a-f\d]{8}-[a-f\d]{4}-[1-5][a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/,
       );
     } finally {
       await app?.close();
-      if (previousUri === undefined) delete process.env.MONGO_URI;
-      else process.env.MONGO_URI = previousUri;
+      if (previousUri === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = previousUri;
       if (previousSecret === undefined) delete process.env.JWT_SECRET;
       else process.env.JWT_SECRET = previousSecret;
       if (previousWorker === undefined)

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { ObjectId } from "mongodb";
+import { uuid } from "../database/query";
 import type { DatabaseService } from "../database/database.service";
 import { normalizeE164 } from "../database/phone-number";
 import type {
@@ -55,14 +55,14 @@ export class LocalMockAdapter extends MockCarrierAdapter {
     )
       throw new Error("Invalid mock inventory page");
     const collection = this.database
-      .nativeDb()
-      .collection<{ e164: string }>("phone_numbers");
+      .sql()
+      .table<{ e164: string }>("phone_numbers");
     const filter = {
-      carrierAccountId: new ObjectId(account.id),
+      carrierAccountId: uuid(account.id),
       status: "active",
     };
     const [totalCount, rows] = await Promise.all([
-      collection.countDocuments(filter),
+      collection.count(filter),
       collection
         .find(filter)
         .sort({ e164: 1 })
@@ -106,8 +106,8 @@ export class LocalMockAdapter extends MockCarrierAdapter {
     );
     await this.database.ensureReady();
     const existing = await this.database
-      .nativeDb()
-      .collection("phone_numbers")
+      .sql()
+      .table("phone_numbers")
       .find(
         { e164: { $in: candidates }, status: "active" },
         { projection: { e164: 1 } },

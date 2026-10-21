@@ -1,15 +1,20 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
-import { ObjectId } from "mongodb";
+import { Id, uuid } from "../database/query";
 import { DatabaseService } from "../database/database.service";
 import { JobStore } from "../jobs/job.store";
 import { JobExecutionError, JobWorker } from "../jobs/job.worker";
 import { DisconnectService } from "./disconnect.service";
 import { PurchaseOrdersService } from "./purchase-orders.service";
 
-function payloadId(value: unknown): ObjectId {
-  if (typeof value !== "string" || !/^[a-f\d]{24}$/i.test(value))
+function payloadId(value: unknown): Id {
+  if (
+    typeof value !== "string" ||
+    !/^[a-f\d]{8}-[a-f\d]{4}-[1-5][a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/i.test(
+      value,
+    )
+  )
     throw new Error("Invalid purchase job ID");
-  return new ObjectId(value);
+  return uuid(value);
 }
 
 @Injectable()
@@ -92,36 +97,36 @@ export class PurchaseJobs implements OnModuleInit, OnModuleDestroy {
 
   async schedulePending(now = new Date()): Promise<void> {
     await this.database.ensureReady();
-    const db = this.database.nativeDb();
+    const db = this.database.sql();
     const slot = Math.floor(now.getTime() / (10 * 60_000));
     const purchases = await db
-      .collection("purchase_orders")
+      .table("purchase_orders")
       .find(
         { status: "pending", nativeOrderId: { $exists: true } },
-        { projection: { _id: 1 } },
+        { projection: { id: 1 } },
       )
       .limit(1000)
       .toArray();
     const disconnects = await db
-      .collection("disconnect_requests")
+      .table("disconnect_requests")
       .find(
         { status: "pending", nativeOrderId: { $exists: true } },
-        { projection: { _id: 1 } },
+        { projection: { id: 1 } },
       )
       .limit(1000)
       .toArray();
     for (const order of purchases)
       await this.jobs.create({
         type: "purchase.track",
-        payload: { orderId: order._id.toHexString() },
-        idempotencyKey: `purchase-recover:${order._id.toHexString()}:${slot}`,
+        payload: { orderId: order.id },
+        idempotencyKey: `purchase-recover:${order.id}:${slot}`,
         maxAttempts: 5,
       });
     for (const request of disconnects)
       await this.jobs.create({
         type: "disconnect.track",
-        payload: { requestId: request._id.toHexString() },
-        idempotencyKey: `disconnect-recover:${request._id.toHexString()}:${slot}`,
+        payload: { requestId: request.id },
+        idempotencyKey: `disconnect-recover:${request.id}:${slot}`,
         maxAttempts: 5,
       });
   }

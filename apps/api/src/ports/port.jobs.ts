@@ -1,14 +1,19 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
-import { ObjectId } from "mongodb";
+import { Id, uuid } from "../database/query";
 import { DatabaseService } from "../database/database.service";
 import { JobStore } from "../jobs/job.store";
 import { JobExecutionError, JobWorker } from "../jobs/job.worker";
 import { PortOperations } from "./port.operations";
 
-function portId(value: unknown): ObjectId {
-  if (typeof value !== "string" || !/^[a-f\d]{24}$/i.test(value))
+function portId(value: unknown): Id {
+  if (
+    typeof value !== "string" ||
+    !/^[a-f\d]{8}-[a-f\d]{4}-[1-5][a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/i.test(
+      value,
+    )
+  )
     throw new Error("Invalid port job ID");
-  return new ObjectId(value);
+  return uuid(value);
 }
 
 @Injectable()
@@ -66,21 +71,21 @@ export class PortJobs implements OnModuleInit, OnModuleDestroy {
     await this.database.ensureReady();
     const slot = Math.floor(now.getTime() / (10 * 60_000));
     const ports = await this.database
-      .nativeDb()
-      .collection("port_requests")
+      .sql()
+      .table("port_requests")
       .find(
         {
           status: { $in: ["SUBMITTED", "DATE_CONFIRMED"] },
         },
-        { projection: { _id: 1, nativeOrderId: 1 } },
+        { projection: { id: 1, nativeOrderId: 1 } },
       )
       .limit(1000)
       .toArray();
     for (const port of ports)
       await this.jobs.create({
         type: port.nativeOrderId ? "port.track" : "port.submit",
-        payload: { portId: port._id.toHexString() },
-        idempotencyKey: `port-recover:${port._id.toHexString()}:${port.nativeOrderId ? "track" : "submit"}:${slot}`,
+        payload: { portId: port.id },
+        idempotencyKey: `port-recover:${port.id}:${port.nativeOrderId ? "track" : "submit"}:${slot}`,
         maxAttempts: 5,
       });
   }

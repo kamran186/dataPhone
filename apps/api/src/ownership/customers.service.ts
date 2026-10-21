@@ -4,14 +4,14 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { MongoServerError, ObjectId } from "mongodb";
+import { DatabaseError, Id, uuid } from "../database/query";
 import { DatabaseService } from "../database/database.service";
 import type { CustomerRecord } from "../database/entities";
 import { AuditService } from "./audit.service";
 
 function view(customer: CustomerRecord) {
   return {
-    id: customer._id.toHexString(),
+    id: customer.id,
     externalId: customer.externalId,
     name: customer.name,
     status: customer.status,
@@ -51,14 +51,12 @@ export class CustomersService {
       throw new BadRequestException("Invalid customer search");
     const escaped = search?.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const filter = escaped ? { name: { $regex: escaped, $options: "i" } } : {};
-    const collection = this.database
-      .nativeDb()
-      .collection<CustomerRecord>("customers");
+    const collection = this.database.sql().table<CustomerRecord>("customers");
     const [total, items] = await Promise.all([
-      collection.countDocuments(filter),
+      collection.count(filter),
       collection
         .find(filter)
-        .sort({ name: 1, _id: 1 })
+        .sort({ name: 1, id: 1 })
         .skip((current - 1) * pageSize)
         .limit(pageSize)
         .toArray(),
@@ -66,49 +64,45 @@ export class CustomersService {
     return { items: items.map(view), total, page: current, pageSize };
   }
 
-  async get(id: ObjectId) {
+  async get(id: Id) {
     await this.database.ensureReady();
     const customer = await this.database
-      .nativeDb()
-      .collection<CustomerRecord>("customers")
-      .findOne({ _id: id });
+      .sql()
+      .table<CustomerRecord>("customers")
+      .findOne({ id: id });
     if (!customer) throw new NotFoundException("Customer not found");
     return view(customer);
   }
 
-  async numbers(id: ObjectId, input: { page?: number; pageSize?: number }) {
+  async numbers(id: Id, input: { page?: number; pageSize?: number }) {
     const { page: current, pageSize } = page(input);
     await this.get(id);
-    const db = this.database.nativeDb();
-    const assignments = db.collection("number_assignments");
+    const db = this.database.sql();
+    const assignments = db.table("number_assignments");
     const filter = { customerId: id, active: true };
     const [total, entries] = await Promise.all([
-      assignments.countDocuments(filter),
+      assignments.count(filter),
       assignments
         .find(filter)
-        .sort({ _id: 1 })
+        .sort({ id: 1 })
         .skip((current - 1) * pageSize)
         .limit(pageSize)
         .toArray(),
     ]);
     const numbers = await db
-      .collection("phone_numbers")
+      .table("phone_numbers")
       .find({
-        _id: { $in: entries.map((entry) => entry.phoneNumberId as ObjectId) },
+        id: { $in: entries.map((entry) => entry.phoneNumberId as Id) },
       })
       .toArray();
-    const byId = new Map(
-      numbers.map((number) => [number._id.toHexString(), number]),
-    );
+    const byId = new Map(numbers.map((number) => [number.id, number]));
     return {
       items: entries.flatMap((entry) => {
-        const number = byId.get(
-          (entry.phoneNumberId as ObjectId).toHexString(),
-        );
+        const number = byId.get(entry.phoneNumberId as Id);
         return number
           ? [
               {
-                id: number._id.toHexString(),
+                id: number.id,
                 e164: number.e164 as string,
                 status: number.status as string,
                 startedAt: entry.startedAt as Date | undefined,
@@ -122,7 +116,7 @@ export class CustomersService {
     };
   }
 
-  async create(input: { externalId: string; name: string }, actorId: ObjectId) {
+  async create(input: { externalId: string; name: string }, actorId: Id) {
     const externalId = input.externalId?.trim();
     const name = input.name?.trim();
     if (!externalId || !/^[A-Za-z0-9_-]{1,64}$/.test(externalId))
@@ -135,7 +129,7 @@ export class CustomersService {
         async (db, session) => {
           const now = new Date();
           const record: CustomerRecord = {
-            _id: new ObjectId(),
+            id: uuid(),
             externalId,
             name,
             status: "active",
@@ -144,12 +138,12 @@ export class CustomersService {
             updatedAt: now,
           };
           await db
-            .collection<CustomerRecord>("customers")
+            .table<CustomerRecord>("customers")
             .insertOne(record, { session });
           await this.audit.append(db, session, {
             type: "customer.created",
             actorId,
-            customerId: record._id,
+            customerId: record.id,
             previous: null,
             next: { externalId, name, status: "active" },
           });
@@ -158,16 +152,16 @@ export class CustomersService {
       );
       return view(customer);
     } catch (error) {
-      if (error instanceof MongoServerError && error.code === 11000)
+      if (error instanceof DatabaseError && error.code === "23505")
         throw new ConflictException("Customer external ID already exists");
       throw error;
     }
   }
 
   async update(
-    id: ObjectId,
+    id: Id,
     input: { name?: string; status?: "active" | "inactive"; version: number },
-    actorId: ObjectId,
+    actorId: Id,
   ) {
     if (!Number.isInteger(input.version) || input.version < 1)
       throw new BadRequestException("Invalid customer version");
@@ -185,8 +179,8 @@ export class CustomersService {
       throw new BadRequestException("No customer changes supplied");
     await this.database.ensureReady();
     const result = await this.database.withTransaction(async (db, session) => {
-      const collection = db.collection<CustomerRecord>("customers");
-      const current = await collection.findOne({ _id: id }, { session });
+      const collection = db.table<CustomerRecord>("customers");
+      const current = await collection.findOne({ id: id }, { session });
       if (!current) throw new NotFoundException("Customer not found");
       if (current.version !== input.version)
         throw new ConflictException("Customer changed since it was loaded");
@@ -198,7 +192,7 @@ export class CustomersService {
         updatedAt: new Date(),
       };
       const changed = await collection.updateOne(
-        { _id: id, version: input.version },
+        { id: id, version: input.version },
         {
           $set: {
             name: next.name,

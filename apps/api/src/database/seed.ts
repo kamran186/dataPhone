@@ -5,7 +5,7 @@ import { localMockEnabled } from "../carriers/local-mock";
 export async function seedCarriers(
   database: DatabaseInfrastructure,
 ): Promise<void> {
-  const carriers = database.nativeDb().collection("carriers");
+  const carriers = database.sql().table("carriers");
   for (const carrier of [
     { code: "peerless", displayName: "Peerless Network" },
     { code: "bulkvs", displayName: "BulkVS" },
@@ -28,9 +28,10 @@ export async function seedCarriers(
 export async function seedCoreRoles(
   database: DatabaseInfrastructure,
 ): Promise<void> {
+  await database.connect();
   await database.initializeSchema();
   await seedCarriers(database);
-  const roles = database.nativeDb().collection("roles");
+  const roles = database.sql().table("roles");
   for (const role of initialRoles) {
     await roles.updateOne(
       { key: role.key },

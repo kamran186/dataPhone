@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import {
   BandwidthAdapter,
-  BulkVsSoapAdapter,
+  BulkVsRestAdapter,
   PeerlessSoapAdapter,
 } from "./adapters";
 import { EnvironmentCarrierCredentialStore } from "./credentials";
@@ -129,7 +129,7 @@ export class CarrierRegistryService extends CarrierRegistry {
   constructor(database: DatabaseService) {
     super([
       new PeerlessSoapAdapter(),
-      new BulkVsSoapAdapter(),
+      new BulkVsRestAdapter(),
       new BandwidthAdapter(
         new EnvironmentCarrierCredentialStore(),
         new FetchCarrierTransport(),

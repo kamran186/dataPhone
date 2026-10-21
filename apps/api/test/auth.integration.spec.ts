@@ -9,7 +9,7 @@ import { bootstrapAdministrator } from "../src/auth/bootstrap-admin";
 import type { UserDocument } from "../src/auth/auth.service";
 import { UsersService } from "../src/auth/users.service";
 
-const baseUrl = process.env.DATAPHONE_TEST_MONGO_URL;
+const baseUrl = process.env.DATAPHONE_TEST_DATABASE_URL;
 const integration = baseUrl ? describe : describe.skip;
 
 integration("employee authentication and permissions", () => {
@@ -23,11 +23,16 @@ integration("employee authentication and permissions", () => {
   const password = "correct horse battery staple 42";
 
   beforeAll(async () => {
-    previousUri = process.env.MONGO_URI;
+    previousUri = process.env.DATABASE_URL;
     previousSecret = process.env.JWT_SECRET;
-    const url = new URL(baseUrl ?? "mongodb://127.0.0.1:27017/");
-    url.pathname = `/dataphone_phase3_test_${randomUUID().replaceAll("-", "")}`;
-    process.env.MONGO_URI = url.toString();
+    const url = new URL(
+      baseUrl ?? "postgresql://dataphone:dataphone@127.0.0.1:54329/dataphone",
+    );
+    url.searchParams.set(
+      "schema",
+      `dataphone_phase3_test_${randomUUID().replaceAll("-", "")}`,
+    );
+    process.env.DATABASE_URL = url.toString();
     process.env.JWT_SECRET = "phase3-test-secret-with-at-least-32-bytes";
     app = await createApp();
     await app.init();
@@ -37,10 +42,10 @@ integration("employee authentication and permissions", () => {
   });
 
   afterAll(async () => {
-    if (database?.isConnected()) await database.nativeDb().dropDatabase();
+    if (database?.isConnected()) await database.dropTestSchema();
     await app?.close();
-    if (previousUri === undefined) delete process.env.MONGO_URI;
-    else process.env.MONGO_URI = previousUri;
+    if (previousUri === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = previousUri;
     if (previousSecret === undefined) delete process.env.JWT_SECRET;
     else process.env.JWT_SECRET = previousSecret;
   });
@@ -49,27 +54,27 @@ integration("employee authentication and permissions", () => {
     await expect(
       bootstrapAdministrator(database, "another@example.test", password),
     ).rejects.toThrow("already initialized");
-    const user = await database.nativeDb().collection("users").findOne({
+    const user = await database.sql().table("users").findOne({
       emailNormalized: email,
     });
     expect(user?.passwordHash).toBeTruthy();
     expect(JSON.stringify(user)).not.toContain(password);
-    const viaTypeOrm = await database
-      .repository<UserDocument>("User")
-      .findOneBy({ emailNormalized: email });
-    expect(viaTypeOrm).toMatchObject({
+    const viaSql = await database
+      .sql()
+      .table<UserDocument>("users")
+      .findOne({ emailNormalized: email });
+    expect(viaSql).toMatchObject({
       email,
       roleKeys: ["SUPER_ADMIN"],
       active: true,
     });
     expect(
-      await database
-        .nativeDb()
-        .collection("schema_migrations")
-        .findOne({
-          _id: "auth-v1" as never,
-        }),
-    ).toMatchObject({ version: 1 });
+      (
+        await database
+          .sql()
+          .query("SELECT version FROM schema_migrations WHERE version=1")
+      ).rows,
+    ).toEqual([{ version: 1 }]);
   });
 
   it("rejects invalid credentials without revealing whether the user exists", async () => {
@@ -160,7 +165,7 @@ integration("employee authentication and permissions", () => {
   it("rejects expired and tampered access tokens", async () => {
     const expired = await new SignJWT({ tokenVersion: 1 })
       .setProtectedHeader({ alg: "HS256" })
-      .setSubject("507f1f77bcf86cd799439011")
+      .setSubject("ac902665-6c90-55b4-b4ab-36c1e3d87cd8")
       .setIssuer("dataphone")
       .setAudience("dataphone-api")
       .setIssuedAt(Math.floor(Date.now() / 1000) - 120)
@@ -303,7 +308,7 @@ integration("employee authentication and permissions", () => {
       outcomes.filter((outcome) => outcome.status === "fulfilled"),
     ).toHaveLength(1);
     expect(
-      await database.nativeDb().collection("users").countDocuments({
+      await database.sql().table("users").count({
         active: true,
         roleKeys: "SUPER_ADMIN",
       }),

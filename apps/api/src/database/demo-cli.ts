@@ -6,7 +6,9 @@ import { seedDemoData } from "./demo-seed";
 async function main(): Promise<void> {
   const password = process.env.DATAPHONE_DEMO_PASSWORD;
   if (!password) throw new Error("DATAPHONE_DEMO_PASSWORD is required");
-  const database = new DatabaseInfrastructure(loadConfig(process.env).mongoUri);
+  const database = new DatabaseInfrastructure(
+    loadConfig(process.env).databaseUrl,
+  );
   try {
     await database.connect();
     await seedDemoData(database, password);

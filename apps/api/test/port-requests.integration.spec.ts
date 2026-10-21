@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import { randomUUID } from "node:crypto";
-import { ObjectId } from "mongodb";
+import { Id, uuid } from "../src/database/query";
 import type { INestApplication } from "@nestjs/common";
 import { bootstrapAdministrator } from "../src/auth/bootstrap-admin";
 import { createApp } from "../src/bootstrap";
@@ -13,14 +13,14 @@ import { DatabaseService } from "../src/database/database.service";
 import { AuditService } from "../src/ownership/audit.service";
 import { PortRequests } from "../src/ports/port.requests";
 
-const baseUrl = process.env.DATAPHONE_TEST_MONGO_URL;
+const baseUrl = process.env.DATAPHONE_TEST_DATABASE_URL;
 const integration = baseUrl ? describe : describe.skip;
 
 integration("port request drafts", () => {
   let database: DatabaseService;
   let service: PortRequests;
-  let customerId: ObjectId;
-  let accountId: ObjectId;
+  let customerId: Id;
+  let accountId: Id;
   let testUri: string;
   const previousKey = process.env.DATAPHONE_PORT_ENCRYPTION_KEY;
 
@@ -28,25 +28,30 @@ integration("port request drafts", () => {
     process.env.DATAPHONE_PORT_ENCRYPTION_KEY = Buffer.alloc(32, 9).toString(
       "base64",
     );
-    const url = new URL(baseUrl ?? "mongodb://127.0.0.1:27017/");
-    url.pathname = `/dataphone_phase9_requests_${randomUUID().replaceAll("-", "")}`;
+    const url = new URL(
+      baseUrl ?? "postgresql://dataphone:dataphone@127.0.0.1:54329/dataphone",
+    );
+    url.searchParams.set(
+      "schema",
+      `dataphone_phase9_requests_${randomUUID().replaceAll("-", "")}`,
+    );
     testUri = url.toString();
     database = new DatabaseService(
-      loadConfig({ MONGO_URI: url.toString(), NODE_ENV: "test" }),
+      loadConfig({ DATABASE_URL: url.toString(), NODE_ENV: "test" }),
     );
     await database.ensureReady();
-    customerId = new ObjectId();
-    accountId = new ObjectId();
+    customerId = uuid();
+    accountId = uuid();
     const carrierId = (await database
-      .nativeDb()
-      .collection("carriers")
-      .findOne({ code: "bandwidth" }))!._id;
+      .sql()
+      .table("carriers")
+      .findOne({ code: "bandwidth" }))!.id;
     await database
-      .nativeDb()
-      .collection("customers")
-      .insertOne({ _id: customerId, name: "Port Buyer", status: "active" });
-    await database.nativeDb().collection("carrier_accounts").insertOne({
-      _id: accountId,
+      .sql()
+      .table("customers")
+      .insertOne({ id: customerId, name: "Port Buyer", status: "active" });
+    await database.sql().table("carrier_accounts").insertOne({
+      id: accountId,
       carrierId,
       externalAccountId: "port-fixture",
       status: "active",
@@ -59,7 +64,7 @@ integration("port request drafts", () => {
   });
 
   afterAll(async () => {
-    if (database?.isConnected()) await database.nativeDb().dropDatabase();
+    if (database?.isConnected()) await database.dropTestSchema();
     await database?.close();
     if (previousKey === undefined)
       delete process.env.DATAPHONE_PORT_ENCRYPTION_KEY;
@@ -67,7 +72,7 @@ integration("port request drafts", () => {
   });
 
   it("stores sensitive fields encrypted and returns a redacted draft with history", async () => {
-    const actorId = new ObjectId();
+    const actorId = uuid();
     const created = await service.create(
       {
         customerId,
@@ -90,22 +95,20 @@ integration("port request drafts", () => {
     expect(created.numbers).toEqual(["+18043024183"]);
     expect(JSON.stringify(created)).not.toContain("secret-account-123");
     const raw = await database
-      .nativeDb()
-      .collection("port_requests")
-      .findOne({ _id: new ObjectId(created.id) });
+      .sql()
+      .table("port_requests")
+      .findOne({ id: uuid(created.id) });
     expect(JSON.stringify(raw)).not.toContain("secret-account-123");
     expect(JSON.stringify(raw)).not.toContain("7788");
-    expect((await service.get(new ObjectId(created.id))).hasAccountNumber).toBe(
-      true,
-    );
+    expect((await service.get(uuid(created.id))).hasAccountNumber).toBe(true);
     expect((await service.list()).items.map((item) => item.id)).toContain(
       created.id,
     );
     expect(
       await database
-        .nativeDb()
-        .collection("port_events")
-        .countDocuments({ portRequestId: new ObjectId(created.id) }),
+        .sql()
+        .table("port_events")
+        .count({ portRequestId: uuid(created.id) }),
     ).toBe(1);
     expect((await new AuditService(database).verify()).valid).toBe(true);
   });
@@ -126,27 +129,25 @@ integration("port request drafts", () => {
         postalCode: "23220",
       },
     };
-    await expect(service.create(input, new ObjectId())).rejects.toThrow(
-      "distinct",
-    );
+    await expect(service.create(input, uuid())).rejects.toThrow("distinct");
     await expect(
       service.create(
-        { ...input, customerId: new ObjectId(), numbers: ["+18043024184"] },
-        new ObjectId(),
+        { ...input, customerId: uuid(), numbers: ["+18043024184"] },
+        uuid(),
       ),
     ).rejects.toThrow("customer");
   });
 
   it("checks portability through a capable mock carrier account", async () => {
-    const mockCarrierId = new ObjectId();
-    const mockAccountId = new ObjectId();
-    await database.nativeDb().collection("carriers").insertOne({
-      _id: mockCarrierId,
+    const mockCarrierId = uuid();
+    const mockAccountId = uuid();
+    await database.sql().table("carriers").insertOne({
+      id: mockCarrierId,
       code: "mock",
       displayName: "Mock",
     });
-    await database.nativeDb().collection("carrier_accounts").insertOne({
-      _id: mockAccountId,
+    await database.sql().table("carrier_accounts").insertOne({
+      id: mockAccountId,
       carrierId: mockCarrierId,
       externalAccountId: "portability-fixture",
       status: "active",
@@ -180,7 +181,7 @@ integration("port request drafts", () => {
   });
 
   it("corrects a draft, cancels it locally, and preserves state history", async () => {
-    const actorId = new ObjectId();
+    const actorId = uuid();
     const port = await service.create(
       {
         customerId,
@@ -199,7 +200,7 @@ integration("port request drafts", () => {
       },
       actorId,
     );
-    const id = new ObjectId(port.id);
+    const id = uuid(port.id);
     const corrected = await service.correct(
       id,
       { accountNumber: "new-secret", pin: "2222" },
@@ -208,10 +209,7 @@ integration("port request drafts", () => {
     expect(corrected.status).toBe("DRAFT");
     expect(
       JSON.stringify(
-        await database
-          .nativeDb()
-          .collection("port_requests")
-          .findOne({ _id: id }),
+        await database.sql().table("port_requests").findOne({ id: id }),
       ),
     ).not.toContain("new-secret");
     expect((await service.cancel(id, actorId)).status).toBe("CANCELLED");
@@ -219,10 +217,7 @@ integration("port request drafts", () => {
       "cannot be corrected",
     );
     expect(
-      await database
-        .nativeDb()
-        .collection("port_events")
-        .countDocuments({ portRequestId: id }),
+      await database.sql().table("port_events").count({ portRequestId: id }),
     ).toBe(3);
     const reopened = await service.create(
       {
@@ -246,10 +241,10 @@ integration("port request drafts", () => {
   });
 
   it("protects draft and document endpoints and returns redacted data", async () => {
-    const previousUri = process.env.MONGO_URI;
+    const previousUri = process.env.DATABASE_URL;
     const previousSecret = process.env.JWT_SECRET;
     const previousWorker = process.env.DATAPHONE_JOB_WORKER_DISABLED;
-    process.env.MONGO_URI = testUri;
+    process.env.DATABASE_URL = testUri;
     process.env.JWT_SECRET = "phase9-port-auth-secret-with-at-least-32-bytes";
     process.env.DATAPHONE_JOB_WORKER_DISABLED = "true";
     let app: INestApplication | undefined;
@@ -281,8 +276,8 @@ integration("port request drafts", () => {
         method: "POST",
         headers,
         body: JSON.stringify({
-          customerId: customerId.toHexString(),
-          carrierAccountId: accountId.toHexString(),
+          customerId: customerId,
+          carrierAccountId: accountId,
           numbers: ["+18043024188"],
           currentProvider: "Old Carrier",
           accountName: "Port Buyer",
@@ -347,8 +342,8 @@ integration("port request drafts", () => {
       );
     } finally {
       await app?.close();
-      if (previousUri === undefined) delete process.env.MONGO_URI;
-      else process.env.MONGO_URI = previousUri;
+      if (previousUri === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = previousUri;
       if (previousSecret === undefined) delete process.env.JWT_SECRET;
       else process.env.JWT_SECRET = previousSecret;
       if (previousWorker === undefined)

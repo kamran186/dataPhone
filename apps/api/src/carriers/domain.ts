@@ -59,17 +59,20 @@ export interface AvailableNumber {
   currency?: string;
 }
 
+export interface NumberSearchRequest {
+  areaCode?: string;
+  city?: string;
+  region?: string;
+  pattern?: string;
+  quantity: number;
+}
 export interface NumberSearchCapability {
   searchNumbers(
     account: CarrierAccount,
-    request: {
-      areaCode?: string;
-      city?: string;
-      region?: string;
-      pattern?: string;
-      quantity: number;
-    },
-  ): Promise<AvailableNumber[]>;
+    request: NumberSearchRequest,
+  ): Promise<
+    AvailableNumber[] | { numbers: AvailableNumber[]; partial?: boolean }
+  >;
 }
 
 export interface CarrierOrder {

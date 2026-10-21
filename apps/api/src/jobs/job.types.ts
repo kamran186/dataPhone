@@ -1,11 +1,11 @@
-import type { ObjectId } from "mongodb";
+import { Id } from "../database/query";
 
 export type JobStatus = "queued" | "running" | "succeeded" | "failed";
 export type JobEventType =
   "queued" | "started" | "progress" | "retry" | "succeeded" | "failed";
 
 export interface BackgroundJob {
-  _id: ObjectId;
+  id: Id;
   type: string;
   payload: Record<string, unknown>;
   fingerprint: string;
@@ -27,8 +27,8 @@ export interface BackgroundJob {
 }
 
 export interface JobEvent {
-  _id: ObjectId;
-  jobId: ObjectId;
+  id: Id;
+  jobId: Id;
   sequence: number;
   type: JobEventType;
   message?: string;

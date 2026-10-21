@@ -1,29 +1,34 @@
 import "reflect-metadata";
 import { randomUUID } from "node:crypto";
-import { ObjectId } from "mongodb";
+import { uuid } from "../src/database/query";
 import { LocalMockAdapter, localMockEnabled } from "../src/carriers/local-mock";
 import { CarrierRegistryService } from "../src/carriers/registry";
 import { loadConfig } from "../src/config/app-config";
 import { DatabaseService } from "../src/database/database.service";
 import { seedCarriers } from "../src/database/seed";
 
-const baseUrl = process.env.DATAPHONE_TEST_MONGO_URL;
+const baseUrl = process.env.DATAPHONE_TEST_DATABASE_URL;
 const integration = baseUrl ? describe : describe.skip;
 integration("explicit local mock carrier", () => {
   let database: DatabaseService;
   const previous = process.env.DATAPHONE_ENABLE_MOCK_CARRIER;
   beforeAll(async () => {
     process.env.DATAPHONE_ENABLE_MOCK_CARRIER = "true";
-    const url = new URL(baseUrl ?? "mongodb://127.0.0.1:27017/");
-    url.pathname = `/dataphone_phase11_mock_${randomUUID().replaceAll("-", "")}`;
+    const url = new URL(
+      baseUrl ?? "postgresql://dataphone:dataphone@127.0.0.1:54329/dataphone",
+    );
+    url.searchParams.set(
+      "schema",
+      `dataphone_phase11_mock_${randomUUID().replaceAll("-", "")}`,
+    );
     database = new DatabaseService(
-      loadConfig({ MONGO_URI: url.toString(), NODE_ENV: "test" }),
+      loadConfig({ DATABASE_URL: url.toString(), NODE_ENV: "test" }),
     );
     await database.ensureReady();
     await seedCarriers(database);
   });
   afterAll(async () => {
-    if (database?.isConnected()) await database.nativeDb().dropDatabase();
+    if (database?.isConnected()) await database.dropTestSchema();
     await database?.close();
     if (previous === undefined)
       delete process.env.DATAPHONE_ENABLE_MOCK_CARRIER;
@@ -31,28 +36,25 @@ integration("explicit local mock carrier", () => {
   });
   it("enables local operations while preserving a production deny guard", async () => {
     expect(localMockEnabled()).toBe(true);
-    expect(
-      await database
-        .nativeDb()
-        .collection("carriers")
-        .countDocuments({ code: "mock" }),
-    ).toBe(1);
+    expect(await database.sql().table("carriers").count({ code: "mock" })).toBe(
+      1,
+    );
     const registry = new CarrierRegistryService(database);
     expect(registry.capabilities("mock")).toContain("port.submit");
     const adapter = new LocalMockAdapter(database);
-    const accountId = new ObjectId(),
+    const accountId = uuid(),
       carrierId = (await database
-        .nativeDb()
-        .collection("carriers")
-        .findOne({ code: "mock" }))!._id;
-    await database.nativeDb().collection("carrier_accounts").insertOne({
-      _id: accountId,
+        .sql()
+        .table("carriers")
+        .findOne({ code: "mock" }))!.id;
+    await database.sql().table("carrier_accounts").insertOne({
+      id: accountId,
       carrierId,
       externalAccountId: "sandbox",
       status: "active",
     });
     const account = {
-      id: accountId.toHexString(),
+      id: accountId,
       carrier: "mock" as const,
       nativeAccountId: "sandbox",
     };
@@ -78,8 +80,8 @@ integration("explicit local mock carrier", () => {
     expect(
       (await adapter.getOrderStatus(account, submitted.nativeOrderId)).numbers,
     ).toEqual(["+18043024183"]);
-    await database.nativeDb().collection("phone_numbers").insertOne({
-      _id: new ObjectId(),
+    await database.sql().table("phone_numbers").insertOne({
+      id: uuid(),
       e164: offer.e164,
       carrierId,
       carrierAccountId: accountId,

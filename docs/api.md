@@ -1,6 +1,6 @@
 # DataPhone API guide
 
-The API prefix is `/api/v1`. Interactive Swagger metadata is served at `/api/docs` when the API is running. Protected endpoints require `Authorization: Bearer <access token>`; the browser also uses a rotating HttpOnly refresh cookie. Errors include an HTTP status and correlation ID. Use the `x-correlation-id` response header for support investigations. All IDs are MongoDB ObjectId strings, and phone numbers use E.164.
+The API prefix is `/api/v1`. Interactive Swagger metadata is served at `/api/docs` when the API is running. Protected endpoints require `Authorization: Bearer <access token>`; the browser also uses a rotating HttpOnly refresh cookie. Errors include an HTTP status and correlation ID. Use the `x-correlation-id` response header for support investigations. All IDs are UUID strings, and phone numbers use E.164.
 
 | Area | Endpoints | Required permission |
 | --- | --- | --- |
@@ -19,3 +19,5 @@ Reports accept `page`, `pageSize`, and `search`. Report types are `all-dids`, `b
 Create a port draft with customer and carrier account IDs, `numbers`, `currentProvider`, `accountName`, `accountNumber`, `pin`, and `serviceAddress` (`line1`, optional `line2`, `city`, `region`, `postalCode`). Secret values are encrypted and never returned. Document upload accepts a JSON body with `filename`, `contentType`, and base64 `base64`; supported formats are PDF, PNG, and JPEG up to 5 MB. A port detail response includes status, native status, FOC date, redacted account-field presence, and history. `DATE_CONFIRMED` means the port remains in progress. Live port submission is disabled.
 
 `GET /jobs/:id/events` is a protected Server-Sent Events stream. Send `Last-Event-ID` to resume persisted events after a disconnect. Background operations return a job ID for progress tracking. Jobs can be queued, running, succeeded, or failed; downstream orders and ports have their own business statuses.
+
+Available-number search at `GET /api/v1/purchases/search` requires `inventory.view`. Purchasing and order listing still require `numbers.purchase`. The response retains `offers` and `errors` and adds per-account `outcomes` with `complete`, `partial`, `unsupported_filter`, or `failed`. Live carriers expose only inventory and search.

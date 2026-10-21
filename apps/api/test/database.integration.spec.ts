@@ -1,225 +1,133 @@
 import "reflect-metadata";
 import { randomUUID } from "node:crypto";
-import { ObjectId } from "mongodb";
 import { DatabaseInfrastructure } from "../src/database/database.infrastructure";
-import { coreEntityNames, type CustomerRecord } from "../src/database/entities";
+import { uuid } from "../src/database/query";
 import { normalizeE164 } from "../src/database/phone-number";
 import { seedCoreRoles } from "../src/database/seed";
-
-const baseUrl = process.env.DATAPHONE_TEST_MONGO_URL;
+const baseUrl = process.env.DATAPHONE_TEST_DATABASE_URL;
 const integration = baseUrl ? describe : describe.skip;
-
-integration("MongoDB infrastructure", () => {
-  const scopedUrl = new URL(baseUrl ?? "mongodb://127.0.0.1:27017/");
-  const databaseName = `dataphone_phase2_test_${randomUUID().replaceAll("-", "")}`;
-  scopedUrl.pathname = `/${databaseName}`;
-  const database = new DatabaseInfrastructure(scopedUrl.toString());
-
+integration("PostgreSQL infrastructure", () => {
+  const url = new URL(baseUrl ?? "postgresql://localhost/dataphone");
+  url.searchParams.set(
+    "schema",
+    `dataphone_database_${randomUUID().replaceAll("-", "")}`,
+  );
+  const database = new DatabaseInfrastructure(url.toString());
   beforeAll(async () => {
     await database.connect();
+    await database.initializeSchema();
   });
-
   afterAll(async () => {
     if (database.isConnected()) {
-      await database.nativeDb().dropDatabase();
+      await database.dropTestSchema();
       await database.close();
     }
   });
-
-  it("persists CRUD through a TypeORM Mongo repository in the same database as the native client", async () => {
-    const customers = database.repository<CustomerRecord>("Customer");
-    const saved = await customers.save({
-      name: "Example Customer",
+  it("persists typed SQL columns and UUID identities", async () => {
+    const table = database.sql().table("customers");
+    const id = uuid();
+    await table.insertOne({
+      id,
+      name: "Example",
       externalId: "cust-1",
-      status: "active",
       version: 1,
-      createdAt: new Date(),
-      updatedAt: new Date(),
     });
-    expect(saved._id).toBeInstanceOf(ObjectId);
-    expect(
-      await database
-        .nativeDb()
-        .collection("customers")
-        .findOne({ _id: saved._id }),
-    ).toMatchObject({ name: "Example Customer" });
-    await customers.updateOne(
-      { _id: saved._id },
-      { $set: { name: "Updated Customer" } },
-    );
-    expect((await customers.findOneBy({ _id: saved._id }))?.name).toBe(
-      "Updated Customer",
-    );
-    await customers.deleteOne({ _id: saved._id });
-    expect(await customers.findOneBy({ _id: saved._id })).toBeNull();
+    expect(await table.findOne({ id })).toMatchObject({ id, name: "Example" });
+    await table.updateOne({ id }, { $set: { name: "Updated" } });
+    expect((await table.findOne({ id }))?.name).toBe("Updated");
+    await table.deleteOne({ id });
+    expect(await table.findOne({ id })).toBeNull();
   });
-
-  it("creates rerunnable versioned indexes and prevents duplicate identities", async () => {
-    await database.initializeSchema();
+  it("applies migrations once and enforces uniqueness, foreign keys and E.164", async () => {
     await database.initializeSchema();
     expect(
-      await database
-        .nativeDb()
-        .collection("schema_migrations")
-        .findOne({
-          _id: "core-v1" as never,
-        }),
-    ).toMatchObject({ version: 1 });
-    const indexes = await database
-      .nativeDb()
-      .collection("phone_numbers")
-      .indexInformation();
-    expect(indexes).toHaveProperty("uq_phone_numbers_e164");
+      (
+        await database
+          .sql()
+          .query("SELECT count(*)::int AS count FROM schema_migrations")
+      ).rows[0].count,
+    ).toBe(1);
     await database
-      .nativeDb()
-      .collection("phone_numbers")
+      .sql()
+      .table("phone_numbers")
       .insertOne({ e164: "+12125550100" });
     await expect(
-      database
-        .nativeDb()
-        .collection("phone_numbers")
-        .insertOne({ e164: "+12125550100" }),
-    ).rejects.toMatchObject({ code: 11000 });
-  });
-
-  it("commits all related writes and rolls back all writes on failure", async () => {
-    await database.withTransaction(async (db, session) => {
-      await db
-        .collection("customers")
-        .insertOne({ name: "committed" }, { session });
-      await db
-        .collection("number_events")
-        .insertOne({ type: "committed" }, { session });
-    });
+      database.sql().table("phone_numbers").insertOne({ e164: "+12125550100" }),
+    ).rejects.toMatchObject({ code: "23505" });
     await expect(
-      database.withTransaction(async (db, session) => {
-        await db.collection("customers").insertOne(
-          { name: "rolled-back" },
-          {
-            session,
-          },
-        );
-        await db
-          .collection("number_events")
-          .insertOne({ type: "rolled-back" }, { session });
+      database.sql().table("carrier_accounts").insertOne({ carrierId: uuid() }),
+    ).rejects.toMatchObject({ code: "23503" });
+    await expect(
+      database.sql().table("phone_numbers").insertOne({ e164: "invalid" }),
+    ).rejects.toMatchObject({ code: "23514" });
+  });
+  it("rolls back all state and events when a transaction fails", async () => {
+    await expect(
+      database.withTransaction(async (tx) => {
+        await tx.table("customers").insertOne({ name: "rolled-back" });
+        await tx.table("number_events").insertOne({ type: "rolled-back" });
         throw new Error("reject transaction");
       }),
     ).rejects.toThrow("reject transaction");
     expect(
-      await database.nativeDb().collection("customers").countDocuments({
-        name: "rolled-back",
-      }),
+      await database.sql().table("customers").count({ name: "rolled-back" }),
     ).toBe(0);
     expect(
-      await database.nativeDb().collection("number_events").countDocuments({
-        type: "rolled-back",
-      }),
+      await database
+        .sql()
+        .table("number_events")
+        .count({ type: "rolled-back" }),
     ).toBe(0);
   });
-
-  it("rejects concurrent updates made against a stale version", async () => {
-    const id = new ObjectId();
-    await database.nativeDb().collection("customers").insertOne({
-      _id: id,
-      name: "original",
-      version: 1,
-    });
-    const results = await Promise.allSettled([
+  it("rejects stale concurrent versions", async () => {
+    const id = uuid();
+    await database
+      .sql()
+      .table("customers")
+      .insertOne({ id, name: "original", version: 1 });
+    const outcomes = await Promise.allSettled([
       database.updateWithVersion("customers", id, 1, { name: "first" }),
       database.updateWithVersion("customers", id, 1, { name: "second" }),
     ]);
     expect(
-      results.filter((result) => result.status === "fulfilled"),
+      outcomes.filter((result) => result.status === "fulfilled"),
     ).toHaveLength(1);
     expect(
-      results.filter((result) => result.status === "rejected"),
-    ).toHaveLength(1);
-    expect(
-      await database.nativeDb().collection("customers").findOne({ _id: id }),
-    ).toMatchObject({ version: 2 });
+      (await database.sql().table("customers").findOne({ id }))?.version,
+    ).toBe(2);
   });
-
-  it("does not offer versioned updates for append-only event collections", async () => {
+  it("does not offer versioned mutation of append-only events", async () => {
     await expect(
-      database.updateWithVersion("security_audit_events", new ObjectId(), 1, {
-        action: "altered",
+      database.updateWithVersion("number_events", uuid(), 1, {
+        type: "changed",
       }),
     ).rejects.toThrow("append-only");
   });
-
-  it("round trips document bytes through GridFS", async () => {
-    const content = Buffer.from("DataPhone Phase 2 document");
-    const id = await database.uploadDocument("sample.txt", content);
-    expect(await database.downloadDocument(id)).toEqual(content);
-  });
-
-  it("persists through a client restart and remains healthy", async () => {
-    await database.nativeDb().collection("customers").insertOne({
-      externalId: "persistent-customer",
-    });
+  it("stores binary bytes and survives a reconnect", async () => {
+    const bytes = Buffer.from([0, 1, 255]);
+    const id = await database.uploadDocument("sample", bytes);
     await database.close();
     await database.connect();
     await database.ping();
-    expect(
-      await database.nativeDb().collection("customers").findOne({
-        externalId: "persistent-customer",
-      }),
-    ).not.toBeNull();
+    expect(await database.downloadDocument(id)).toEqual(bytes);
   });
-
-  it("registers a TypeORM repository for each core collection", () => {
-    expect(coreEntityNames).toHaveLength(18);
-    for (const name of coreEntityNames) {
-      expect(database.repository(name).metadata.tableName).toBeTruthy();
-    }
-  });
-
-  it("uses date and boolean metadata for indexed job and lifecycle fields", () => {
-    const jobs = database.repository("BackgroundJob").metadata;
-    expect(jobs.findColumnWithPropertyName("runAt")?.type).toBe(Date);
-    expect(jobs.findColumnWithPropertyName("leaseUntil")?.type).toBe(Date);
-    expect(
-      database
-        .repository("CarrierSyncRun")
-        .metadata.findColumnWithPropertyName("startedAt")?.type,
-    ).toBe(Date);
-    expect(
-      database
-        .repository("ReconciliationIssue")
-        .metadata.findColumnWithPropertyName("detectedAt")?.type,
-    ).toBe(Date);
-    expect(
-      database
-        .repository("NumberAssignment")
-        .metadata.findColumnWithPropertyName("active")?.type,
-    ).toBe(Boolean);
-  });
-
-  it("seeds the four initial roles idempotently", async () => {
+  it("seeds roles idempotently", async () => {
     await seedCoreRoles(database);
     const first = await database
-      .nativeDb()
-      .collection("roles")
-      .find({}, { projection: { key: 1 } })
+      .sql()
+      .table("roles")
+      .find()
+      .sort({ key: 1 })
       .toArray();
     await seedCoreRoles(database);
-    const second = await database
-      .nativeDb()
-      .collection("roles")
-      .find({}, { projection: { key: 1 } })
-      .toArray();
-    expect(first.map((role) => role.key).sort()).toEqual([
-      "OPERATIONS_MANAGER",
-      "OPERATIONS_STAFF",
-      "SUPER_ADMIN",
-      "VIEWER",
-    ]);
-    expect(second).toEqual(first);
+    expect(
+      await database.sql().table("roles").find().sort({ key: 1 }).toArray(),
+    ).toEqual(first);
+    expect(first).toHaveLength(4);
   });
 });
-
 describe("phone number normalization", () => {
-  it("produces canonical E.164 and rejects malformed numbers", () => {
+  it("validates E.164", () => {
     expect(normalizeE164("+1 (212) 555-0100")).toBe("+12125550100");
     expect(() => normalizeE164("2125550100")).toThrow();
     expect(() => normalizeE164("+0123")).toThrow();

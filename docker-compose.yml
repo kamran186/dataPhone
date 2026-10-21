@@ -1,31 +1,20 @@
 services:
-  mongo:
-    image: mongo:7.0
-    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: dataphone
+      POSTGRES_USER: dataphone
+      POSTGRES_PASSWORD: ${DATAPHONE_DATABASE_PASSWORD:-dataphone-local}
     ports:
-      - "127.0.0.1:27018:27017"
+      - "127.0.0.1:54328:5432"
     volumes:
-      - mongo_data:/data/db
+      - postgres_data:/var/lib/postgresql/data
     networks: [dataphone]
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "mongosh --quiet --eval 'db.adminCommand({ping:1}).ok' | grep -q 1",
-        ]
+      test: ["CMD-SHELL", "pg_isready -U dataphone -d dataphone"]
       interval: 5s
       timeout: 3s
       retries: 20
-
-  mongo-init:
-    image: mongo:7.0
-    depends_on:
-      mongo:
-        condition: service_healthy
-    volumes:
-      - ./infrastructure/scripts/init-replica.sh:/init-replica.sh:ro
-    entrypoint: ["sh", "/init-replica.sh"]
-    networks: [dataphone]
 
   api:
     build:
@@ -34,15 +23,19 @@ services:
     environment:
       NODE_ENV: development
       PORT: 3000
-      MONGO_URI: mongodb://mongo:27017/dataphone?replicaSet=rs0
+      DATABASE_URL: postgresql://dataphone:${DATAPHONE_DATABASE_PASSWORD:-dataphone-local}@postgres:5432/dataphone
       CORS_ORIGIN: http://localhost:8080
       DATAPHONE_PORT_ENCRYPTION_KEY: ${DATAPHONE_PORT_ENCRYPTION_KEY:-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
       DATAPHONE_ENABLE_MOCK_CARRIER: ${DATAPHONE_ENABLE_MOCK_CARRIER:-true}
       DATAPHONE_SEED_DEMO: ${DATAPHONE_SEED_DEMO:-true}
       DATAPHONE_DEMO_PASSWORD: ${DATAPHONE_DEMO_PASSWORD:-Admin@123456}
+    # Optional untracked file for carrier test credentials, one KEY=value per line.
+    env_file:
+      - path: .env.carriers
+        required: false
     depends_on:
-      mongo-init:
-        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
     networks: [dataphone]
 
   web:
@@ -55,7 +48,7 @@ services:
     networks: [dataphone]
 
 volumes:
-  mongo_data:
+  postgres_data:
 
 networks:
   dataphone:

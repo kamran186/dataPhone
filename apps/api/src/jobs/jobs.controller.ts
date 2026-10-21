@@ -7,15 +7,20 @@ import {
   Sse,
 } from "@nestjs/common";
 import type { MessageEvent } from "@nestjs/common";
-import { ObjectId } from "mongodb";
+import { Id, uuid } from "../database/query";
 import { concatMap, from, merge, mergeMap, timer, map } from "rxjs";
 import { RequirePermissions } from "../auth/auth.decorators";
 import { JobStore } from "./job.store";
 import type { BackgroundJob, JobEvent } from "./job.types";
 
-function parseId(id: string): ObjectId {
-  if (!/^[a-f\d]{24}$/i.test(id)) throw new NotFoundException("Job not found");
-  return new ObjectId(id);
+function parseId(id: string): Id {
+  if (
+    !/^[a-f\d]{8}-[a-f\d]{4}-[1-5][a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/i.test(
+      id,
+    )
+  )
+    throw new NotFoundException("Job not found");
+  return uuid(id);
 }
 
 function parseCursor(value: string): number {
@@ -26,7 +31,7 @@ function parseCursor(value: string): number {
 
 function presentJob(job: BackgroundJob) {
   return {
-    id: job._id.toHexString(),
+    id: job.id,
     type: job.type,
     status: job.status,
     progress: job.progress,
@@ -45,7 +50,7 @@ function presentEvent(event: JobEvent): MessageEvent {
     id: String(event.sequence),
     type: event.type,
     data: {
-      jobId: event.jobId.toHexString(),
+      jobId: event.jobId,
       type: event.type,
       progress: event.progress,
       message: event.message,

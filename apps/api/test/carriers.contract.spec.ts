@@ -1,7 +1,7 @@
 import "reflect-metadata";
 import {
   BandwidthAdapter,
-  BulkVsSoapAdapter,
+  BulkVsRestAdapter,
   PeerlessSoapAdapter,
   normalizeBandwidthInventory,
 } from "../src/carriers/adapters";
@@ -27,7 +27,7 @@ const credentials = new EnvironmentCarrierCredentialStore({
 function registry(fetcher: typeof fetch) {
   return new CarrierRegistry([
     new PeerlessSoapAdapter(),
-    new BulkVsSoapAdapter(),
+    new BulkVsRestAdapter(),
     new BandwidthAdapter(credentials, new FetchCarrierTransport(100, fetcher)),
     new MockCarrierAdapter(["+18043024183", "+18042121778"]),
   ]);
@@ -36,14 +36,23 @@ function registry(fetcher: typeof fetch) {
 describe("carrier adapter contract", () => {
   it("resolves capabilities and rejects unsupported operations", () => {
     const carriers = registry(async () => new Response());
-    expect(carriers.capabilities("bandwidth")).toEqual(["inventory.list"]);
-    expect(carriers.capabilities("peerless")).toEqual([]);
-    expect(carriers.capabilities("bulkvs")).toEqual([]);
+    expect(carriers.capabilities("bandwidth")).toEqual([
+      "inventory.list",
+      "number.search",
+    ]);
+    expect(carriers.capabilities("peerless")).toEqual([
+      "inventory.list",
+      "number.search",
+    ]);
+    expect(carriers.capabilities("bulkvs")).toEqual([
+      "inventory.list",
+      "number.search",
+    ]);
     expect(() => carriers.resolve(account, "number.purchase")).toThrow(
       CarrierError,
     );
     expect(() =>
-      carriers.resolve({ ...account, carrier: "peerless" }, "inventory.list"),
+      carriers.resolve({ ...account, carrier: "peerless" }, "number.purchase"),
     ).toThrow("does not support");
   });
 

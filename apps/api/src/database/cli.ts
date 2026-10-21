@@ -8,7 +8,9 @@ async function main(): Promise<void> {
   if (command !== "init" && command !== "seed") {
     throw new Error("Usage: database/cli.js init|seed");
   }
-  const database = new DatabaseInfrastructure(loadConfig(process.env).mongoUri);
+  const database = new DatabaseInfrastructure(
+    loadConfig(process.env).databaseUrl,
+  );
   try {
     await database.connect();
     if (command === "init") await database.initializeSchema();

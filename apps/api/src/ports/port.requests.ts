@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { Filter, MongoServerError, ObjectId } from "mongodb";
+import { DatabaseError, Filter, Id, uuid } from "../database/query";
 import { CarrierRegistryService } from "../carriers/registry";
 import type { CarrierAccount, CarrierCode } from "../carriers/domain";
 import { DatabaseService } from "../database/database.service";
@@ -26,8 +26,8 @@ export interface ServiceAddress {
   postalCode: string;
 }
 export interface PortDraftInput {
-  customerId: ObjectId;
-  carrierAccountId: ObjectId;
+  customerId: Id;
+  carrierAccountId: Id;
   numbers: string[];
   currentProvider: string;
   accountName: string;
@@ -36,10 +36,10 @@ export interface PortDraftInput {
   serviceAddress: ServiceAddress;
 }
 export interface PortRecord {
-  _id: ObjectId;
-  actorId: ObjectId;
-  customerId: ObjectId;
-  carrierAccountId: ObjectId;
+  id: Id;
+  actorId: Id;
+  customerId: Id;
+  carrierAccountId: Id;
   numbers: string[];
   currentProvider: string;
   accountName: string;
@@ -52,16 +52,16 @@ export interface PortRecord {
   nativeStatus?: string;
   focDate?: Date;
   rejectionReason?: string;
-  jobId?: ObjectId;
+  jobId?: Id;
   unfulfilledCount?: number;
   createdAt: Date;
   updatedAt: Date;
 }
 interface PortEvent {
-  _id: ObjectId;
-  portRequestId: ObjectId;
+  id: Id;
+  portRequestId: Id;
   type: string;
-  actorId: ObjectId;
+  actorId: Id;
   previous: unknown;
   next: unknown;
   createdAt: Date;
@@ -104,9 +104,9 @@ function validateAddress(raw: ServiceAddress): ServiceAddress {
 }
 export function portView(record: PortRecord) {
   return {
-    id: record._id.toHexString(),
-    customerId: record.customerId.toHexString(),
-    carrierAccountId: record.carrierAccountId.toHexString(),
+    id: record.id,
+    customerId: record.customerId,
+    carrierAccountId: record.carrierAccountId,
     numbers: record.numbers,
     currentProvider: record.currentProvider,
     accountName: record.accountName,
@@ -119,7 +119,7 @@ export function portView(record: PortRecord) {
     nativeStatus: record.nativeStatus,
     focDate: record.focDate,
     rejectionReason: record.rejectionReason,
-    jobId: record.jobId?.toHexString(),
+    jobId: record.jobId,
     unfulfilledCount: record.unfulfilledCount,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
@@ -134,24 +134,24 @@ export class PortRequests {
     private readonly audit: AuditService,
   ) {}
 
-  async checkPortability(carrierAccountId: ObjectId, rawNumber: string) {
+  async checkPortability(carrierAccountId: Id, rawNumber: string) {
     const number = normalize(rawNumber);
     await this.database.ensureReady();
-    const db = this.database.nativeDb();
+    const db = this.database.sql();
     const account = await db
-      .collection<{
-        _id: ObjectId;
-        carrierId: ObjectId;
+      .table<{
+        id: Id;
+        carrierId: Id;
         externalAccountId: string;
         credentialRef?: string;
         status: string;
       }>("carrier_accounts")
-      .findOne({ _id: carrierAccountId, status: "active" });
+      .findOne({ id: carrierAccountId, status: "active" });
     if (!account)
       throw new NotFoundException("Active carrier account not found");
     const carrier = await db
-      .collection<{ _id: ObjectId; code: CarrierCode }>("carriers")
-      .findOne({ _id: account.carrierId });
+      .table<{ id: Id; code: CarrierCode }>("carriers")
+      .findOne({ id: account.carrierId });
     if (!carrier) throw new NotFoundException("Carrier not found");
     if (
       !this.carriers.capabilities(carrier.code).includes("number.portability")
@@ -160,7 +160,7 @@ export class PortRequests {
         "Carrier portability checking is unavailable",
       );
     const reference: CarrierAccount = {
-      id: account._id.toHexString(),
+      id: account.id,
       carrier: carrier.code,
       nativeAccountId: account.externalAccountId,
       credentialRef: account.credentialRef,
@@ -172,11 +172,11 @@ export class PortRequests {
       e164: number,
       portable: result.portable,
       carrier: carrier.code,
-      carrierAccountId: carrierAccountId.toHexString(),
+      carrierAccountId: carrierAccountId,
     };
   }
 
-  async create(input: PortDraftInput, actorId: ObjectId) {
+  async create(input: PortDraftInput, actorId: Id) {
     if (
       !Array.isArray(input.numbers) ||
       input.numbers.length < 1 ||
@@ -197,20 +197,20 @@ export class PortRequests {
       Buffer.from(required(input.pin, "PIN", 64)),
     );
     await this.database.ensureReady();
-    const db = this.database.nativeDb();
+    const db = this.database.sql();
     if (
       !(await db
-        .collection("customers")
-        .findOne({ _id: input.customerId, status: "active" }))
+        .table("customers")
+        .findOne({ id: input.customerId, status: "active" }))
     )
       throw new NotFoundException("Active customer not found");
     if (
       !(await db
-        .collection("carrier_accounts")
-        .findOne({ _id: input.carrierAccountId, status: "active" }))
+        .table("carrier_accounts")
+        .findOne({ id: input.carrierAccountId, status: "active" }))
     )
       throw new NotFoundException("Active carrier account not found");
-    const overlap = await db.collection("port_requests").findOne({
+    const overlap = await db.table("port_requests").findOne({
       numbers: { $in: numbers },
       status: { $in: ["DRAFT", "SUBMITTED", "DATE_CONFIRMED", "REJECTED"] },
     });
@@ -220,7 +220,7 @@ export class PortRequests {
       return await this.database.withTransaction(async (tx, session) => {
         const now = new Date();
         const record: PortRecord = {
-          _id: new ObjectId(),
+          id: uuid(),
           actorId,
           customerId: input.customerId,
           carrierAccountId: input.carrierAccountId,
@@ -236,22 +236,22 @@ export class PortRequests {
           updatedAt: now,
         };
         await tx
-          .collection<PortRecord>("port_requests")
+          .table<PortRecord>("port_requests")
           .insertOne(record, { session });
-        await tx.collection("port_request_numbers").insertMany(
+        await tx.table("port_request_numbers").insertMany(
           numbers.map((e164) => ({
-            _id: new ObjectId(),
-            portRequestId: record._id,
+            id: uuid(),
+            portRequestId: record.id,
             e164,
             status: "DRAFT",
             createdAt: now,
           })),
           { session },
         );
-        await tx.collection<PortEvent>("port_events").insertOne(
+        await tx.table<PortEvent>("port_events").insertOne(
           {
-            _id: new ObjectId(),
-            portRequestId: record._id,
+            id: uuid(),
+            portRequestId: record.id,
             type: "port.created",
             actorId,
             previous: null,
@@ -265,12 +265,12 @@ export class PortRequests {
           actorId,
           customerId: input.customerId,
           previous: null,
-          next: { portRequestId: record._id.toHexString(), numbers },
+          next: { portRequestId: record.id, numbers },
         });
         return portView(record);
       });
     } catch (error) {
-      if (error instanceof MongoServerError && error.code === 11000)
+      if (error instanceof DatabaseError && error.code === "23505")
         throw new ConflictException(
           "A number already has an open port request",
         );
@@ -278,25 +278,25 @@ export class PortRequests {
     }
   }
 
-  async get(id: ObjectId) {
+  async get(id: Id) {
     await this.database.ensureReady();
     const record = await this.database
-      .nativeDb()
-      .collection<PortRecord>("port_requests")
-      .findOne({ _id: id });
+      .sql()
+      .table<PortRecord>("port_requests")
+      .findOne({ id: id });
     if (!record) throw new NotFoundException("Port request not found");
     const events = await this.database
-      .nativeDb()
-      .collection<PortEvent>("port_events")
+      .sql()
+      .table<PortEvent>("port_events")
       .find({ portRequestId: id })
       .sort({ createdAt: 1 })
       .toArray();
     return {
       ...portView(record),
       history: events.map((event) => ({
-        id: event._id.toHexString(),
+        id: event.id,
         type: event.type,
-        actorId: event.actorId.toHexString(),
+        actorId: event.actorId,
         previous: event.previous,
         next: event.next,
         createdAt: event.createdAt,
@@ -320,14 +320,12 @@ export class PortRequests {
       : {
           status: { $in: ["DRAFT", "SUBMITTED", "DATE_CONFIRMED", "REJECTED"] },
         };
-    const collection = this.database
-      .nativeDb()
-      .collection<PortRecord>("port_requests");
+    const collection = this.database.sql().table<PortRecord>("port_requests");
     const [total, rows] = await Promise.all([
-      collection.countDocuments(query),
+      collection.count(query),
       collection
         .find(query)
-        .sort({ updatedAt: -1, _id: -1 })
+        .sort({ updatedAt: -1, id: -1 })
         .skip((page - 1) * pageSize)
         .limit(pageSize)
         .toArray(),
@@ -336,7 +334,7 @@ export class PortRequests {
   }
 
   async correct(
-    id: ObjectId,
+    id: Id,
     changes: Partial<
       Pick<
         PortDraftInput,
@@ -347,7 +345,7 @@ export class PortRequests {
         | "serviceAddress"
       >
     >,
-    actorId: ObjectId,
+    actorId: Id,
   ) {
     const fields = Object.keys(changes);
     if (
@@ -367,8 +365,8 @@ export class PortRequests {
     await this.database.ensureReady();
     const crypto = new PortCrypto();
     return this.database.withTransaction(async (tx, session) => {
-      const collection = tx.collection<PortRecord>("port_requests");
-      const current = await collection.findOne({ _id: id }, { session });
+      const collection = tx.table<PortRecord>("port_requests");
+      const current = await collection.findOne({ id: id }, { session });
       if (!current) throw new NotFoundException("Port request not found");
       if (!["DRAFT", "REJECTED"].includes(current.status))
         throw new ConflictException(
@@ -412,15 +410,15 @@ export class PortRequests {
         rejectionReason: undefined,
       };
       const updated = await collection.replaceOne(
-        { _id: id, version: current.version },
+        { id: id, version: current.version },
         next,
         { session },
       );
       if (!updated.matchedCount)
         throw new ConflictException("Port request changed");
-      await tx.collection<PortEvent>("port_events").insertOne(
+      await tx.table<PortEvent>("port_events").insertOne(
         {
-          _id: new ObjectId(),
+          id: uuid(),
           portRequestId: id,
           type: "port.corrected",
           actorId,
@@ -436,7 +434,7 @@ export class PortRequests {
         customerId: current.customerId,
         previous: { status: current.status, version: current.version },
         next: {
-          portRequestId: id.toHexString(),
+          portRequestId: id,
           status: "DRAFT",
           version: next.version,
         },
@@ -445,11 +443,11 @@ export class PortRequests {
     });
   }
 
-  async cancel(id: ObjectId, actorId: ObjectId) {
+  async cancel(id: Id, actorId: Id) {
     await this.database.ensureReady();
     return this.database.withTransaction(async (tx, session) => {
-      const collection = tx.collection<PortRecord>("port_requests");
-      const current = await collection.findOne({ _id: id }, { session });
+      const collection = tx.table<PortRecord>("port_requests");
+      const current = await collection.findOne({ id: id }, { session });
       if (!current) throw new NotFoundException("Port request not found");
       if (current.status === "CANCELLED") return portView(current);
       if (!["DRAFT", "REJECTED"].includes(current.status))
@@ -458,22 +456,22 @@ export class PortRequests {
         );
       const now = new Date();
       const updated = await collection.updateOne(
-        { _id: id, version: current.version },
+        { id: id, version: current.version },
         { $set: { status: "CANCELLED", updatedAt: now }, $inc: { version: 1 } },
         { session },
       );
       if (!updated.matchedCount)
         throw new ConflictException("Port request changed");
       await tx
-        .collection("port_request_numbers")
+        .table("port_request_numbers")
         .updateMany(
           { portRequestId: id },
           { $set: { status: "CANCELLED" } },
           { session },
         );
-      await tx.collection<PortEvent>("port_events").insertOne(
+      await tx.table<PortEvent>("port_events").insertOne(
         {
-          _id: new ObjectId(),
+          id: uuid(),
           portRequestId: id,
           type: "port.cancelled",
           actorId,
@@ -488,7 +486,7 @@ export class PortRequests {
         actorId,
         customerId: current.customerId,
         previous: { status: current.status },
-        next: { portRequestId: id.toHexString(), status: "CANCELLED" },
+        next: { portRequestId: id, status: "CANCELLED" },
       });
       return portView({
         ...current,

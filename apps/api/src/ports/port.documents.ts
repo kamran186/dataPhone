@@ -3,15 +3,15 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { ObjectId } from "mongodb";
+import { Id, uuid } from "../database/query";
 import { DatabaseService } from "../database/database.service";
 import { AuditService } from "../ownership/audit.service";
 import { PortCrypto } from "./port.crypto";
 
 export interface PortDocumentRecord {
-  _id: ObjectId;
-  portRequestId: ObjectId;
-  fileId: ObjectId;
+  id: Id;
+  portRequestId: Id;
+  fileId: Id;
   filename: string;
   contentType: string;
   byteLength: number;
@@ -20,7 +20,7 @@ export interface PortDocumentRecord {
 
 function view(document: PortDocumentRecord) {
   return {
-    id: document._id.toHexString(),
+    id: document.id,
     filename: document.filename,
     contentType: document.contentType,
     byteLength: document.byteLength,
@@ -36,11 +36,11 @@ export class PortDocuments {
   ) {}
 
   async upload(
-    portRequestId: ObjectId,
+    portRequestId: Id,
     filename: string,
     contentType: string,
     content: Buffer,
-    actorId: ObjectId,
+    actorId: Id,
   ) {
     if (
       typeof filename !== "string" ||
@@ -70,19 +70,17 @@ export class PortDocuments {
     if (!matchesType)
       throw new BadRequestException("Document content does not match its type");
     await this.database.ensureReady();
-    const db = this.database.nativeDb();
-    const port = await db
-      .collection("port_requests")
-      .findOne({ _id: portRequestId });
+    const db = this.database.sql();
+    const port = await db.table("port_requests").findOne({ id: portRequestId });
     if (!port) throw new NotFoundException("Port request not found");
     const sealed = new PortCrypto().encrypt(content);
-    const fileId = await this.database.uploadDocument(
-      `port-${portRequestId.toHexString()}`,
-      sealed,
-    );
-    try {
+    return this.database.withTransaction(async (tx, session) => {
+      const fileId = await this.database.uploadDocument(
+        `port-${portRequestId}`,
+        sealed,
+      );
       const record: PortDocumentRecord = {
-        _id: new ObjectId(),
+        id: uuid(),
         portRequestId,
         fileId,
         filename,
@@ -90,67 +88,59 @@ export class PortDocuments {
         byteLength: content.length,
         createdAt: new Date(),
       };
-      await this.database.withTransaction(async (tx, session) => {
-        await tx
-          .collection<PortDocumentRecord>("port_documents")
-          .insertOne(record, { session });
-        await tx.collection("port_events").insertOne(
-          {
-            _id: new ObjectId(),
-            portRequestId,
-            type: "port.document_uploaded",
-            actorId,
-            previous: null,
-            next: {
-              documentId: record._id.toHexString(),
-              filename,
-              byteLength: record.byteLength,
-            },
-            createdAt: record.createdAt,
-          },
-          { session },
-        );
-        await this.audit.append(tx, session, {
+      await tx
+        .table<PortDocumentRecord>("port_documents")
+        .insertOne(record, { session });
+      await tx.table("port_events").insertOne(
+        {
+          id: uuid(),
+          portRequestId,
           type: "port.document_uploaded",
           actorId,
-          customerId: port.customerId as ObjectId | undefined,
           previous: null,
           next: {
-            portRequestId: portRequestId.toHexString(),
-            documentId: record._id.toHexString(),
+            documentId: record.id,
+            filename,
+            byteLength: record.byteLength,
           },
-        });
+          createdAt: record.createdAt,
+        },
+        { session },
+      );
+      await this.audit.append(tx, session, {
+        type: "port.document_uploaded",
+        actorId,
+        customerId: port.customerId as Id | undefined,
+        previous: null,
+        next: {
+          portRequestId: portRequestId,
+          documentId: record.id,
+        },
       });
       return view(record);
-    } catch (error) {
-      await this.database
-        .gridFsBucket()
-        .delete(fileId)
-        .catch(() => undefined);
-      throw error;
-    }
+    });
   }
 
-  async list(portRequestId: ObjectId) {
+  async list(portRequestId: Id) {
     await this.database.ensureReady();
-    const db = this.database.nativeDb();
-    if (!(await db.collection("port_requests").findOne({ _id: portRequestId })))
+    const db = this.database.sql();
+    if (!(await db.table("port_requests").findOne({ id: portRequestId })))
       throw new NotFoundException("Port request not found");
     return (
       await db
-        .collection<PortDocumentRecord>("port_documents")
+        .table<PortDocumentRecord>("port_documents")
         .find({ portRequestId })
         .sort({ createdAt: -1 })
         .toArray()
     ).map(view);
   }
 
-  async download(portRequestId: ObjectId, documentId: ObjectId) {
+  async download(portRequestId: Id, documentId: Id) {
     await this.database.ensureReady();
     const record = await this.database
-      .nativeDb()
-      .collection<PortDocumentRecord>("port_documents")
-      .findOne({ _id: documentId, portRequestId });
+      .sql()
+      .table<PortDocumentRecord>("port_documents")
+      .findOne({ id: documentId, portRequestId });
     if (!record) throw new NotFoundException("Document not found");
     const sealed = await this.database.downloadDocument(record.fileId);
     return { ...view(record), content: new PortCrypto().decrypt(sealed) };

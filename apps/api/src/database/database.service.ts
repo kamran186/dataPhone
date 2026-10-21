@@ -9,9 +9,10 @@ export class DatabaseService
   implements OnModuleDestroy
 {
   private ready?: Promise<void>;
+  private expiryTimer?: NodeJS.Timeout;
 
   constructor(@Inject(APP_CONFIG) config: AppConfig) {
-    super(config.mongoUri);
+    super(config.databaseUrl);
   }
 
   async ensureReady(): Promise<void> {
@@ -28,9 +29,24 @@ export class DatabaseService
     await this.connect();
     await this.initializeSchema();
     await seedCarriers(this);
+    await this.cleanupExpiredAuthentication();
+    this.expiryTimer = setInterval(() => {
+      void this.cleanupExpiredAuthentication().catch(() => undefined);
+    }, 60 * 60_000);
+    this.expiryTimer.unref();
+  }
+
+  private async cleanupExpiredAuthentication(): Promise<void> {
+    await this.sql().query(
+      'DELETE FROM auth_sessions WHERE "expiresAt" <= now()',
+    );
+    await this.sql().query(
+      'DELETE FROM login_attempts WHERE "expiresAt" <= now()',
+    );
   }
 
   async onModuleDestroy(): Promise<void> {
+    if (this.expiryTimer) clearInterval(this.expiryTimer);
     await this.close();
   }
 }

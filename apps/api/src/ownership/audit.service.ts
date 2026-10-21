@@ -1,21 +1,21 @@
 import { createHash } from "node:crypto";
 import { BadRequestException, Injectable } from "@nestjs/common";
-import type { ClientSession, Db } from "mongodb";
-import { ObjectId } from "mongodb";
+import { Id, SqlDatabase, SqlSession, uuid } from "../database/query";
+
 import { DatabaseService } from "../database/database.service";
 
 export interface AuditInput {
   type: string;
-  actorId: ObjectId;
-  customerId?: ObjectId;
-  relatedCustomerIds?: ObjectId[];
-  phoneNumberId?: ObjectId;
+  actorId: Id;
+  customerId?: Id;
+  relatedCustomerIds?: Id[];
+  phoneNumberId?: Id;
   previous: unknown;
   next: unknown;
 }
 
 interface AuditEvent extends AuditInput {
-  _id: ObjectId;
+  id: Id;
   sequence: number;
   previousHash: string;
   hash: string;
@@ -23,7 +23,7 @@ interface AuditEvent extends AuditInput {
 }
 
 interface ChainHead {
-  _id: string;
+  id: string;
   sequence: number;
   hash: string;
 }
@@ -38,31 +38,43 @@ export interface HistoryFilter {
 
 const GENESIS_HASH = "0".repeat(64);
 
-function digest(event: Omit<AuditEvent, "_id" | "hash">): string {
+function canonical(value: unknown): unknown {
+  if (value instanceof Date) return value.toISOString();
+  if (Buffer.isBuffer(value)) return canonical(value.toJSON());
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([key, item]) => [key, canonical(item)]),
+    );
+  return value;
+}
+
+function digest(event: Omit<AuditEvent, "id" | "hash">): string {
   const payload = {
     sequence: event.sequence,
     type: event.type,
-    actorId: event.actorId.toHexString(),
-    customerId: event.customerId?.toHexString() ?? null,
-    relatedCustomerIds:
-      event.relatedCustomerIds?.map((id) => id.toHexString()) ?? null,
-    phoneNumberId: event.phoneNumberId?.toHexString() ?? null,
+    actorId: event.actorId,
+    customerId: event.customerId ?? null,
+    relatedCustomerIds: event.relatedCustomerIds?.map((id) => id) ?? null,
+    phoneNumberId: event.phoneNumberId ?? null,
     previous: event.previous,
     next: event.next,
     createdAt: event.createdAt.toISOString(),
   };
   return createHash("sha256")
-    .update(`${event.previousHash}\n${JSON.stringify(payload)}`)
+    .update(`${event.previousHash}\n${JSON.stringify(canonical(payload))}`)
     .digest("hex");
 }
 
 export async function appendAuditEvent(
-  db: Db,
-  session: ClientSession,
+  db: SqlDatabase,
+  session: SqlSession,
   input: AuditInput,
 ): Promise<AuditEvent> {
-  const heads = db.collection<ChainHead>("audit_chain_heads");
-  const head = await heads.findOne({ _id: "global" }, { session });
+  const heads = db.table<ChainHead>("audit_chain_heads");
+  const head = await heads.findOne({ id: "global" }, { session });
   if (!head) throw new Error("Audit chain is not initialized");
   const eventWithoutHash = {
     sequence: head.sequence + 1,
@@ -71,20 +83,18 @@ export async function appendAuditEvent(
     createdAt: new Date(),
   };
   const event: AuditEvent = {
-    _id: new ObjectId(),
+    id: uuid(),
     ...eventWithoutHash,
     hash: digest(eventWithoutHash),
   };
   const advanced = await heads.updateOne(
-    { _id: "global", sequence: head.sequence },
+    { id: "global", sequence: head.sequence },
     { $set: { sequence: event.sequence, hash: event.hash } },
     { session },
   );
   if (!advanced.matchedCount)
     throw new Error("Audit chain changed during mutation");
-  await db
-    .collection<AuditEvent>("number_events")
-    .insertOne(event, { session });
+  await db.table<AuditEvent>("number_events").insertOne(event, { session });
   return event;
 }
 
@@ -93,8 +103,8 @@ export class AuditService {
   constructor(private readonly database: DatabaseService) {}
 
   async append(
-    db: Db,
-    session: ClientSession,
+    db: SqlDatabase,
+    session: SqlSession,
     input: AuditInput,
   ): Promise<AuditEvent> {
     return appendAuditEvent(db, session, input);
@@ -106,9 +116,9 @@ export class AuditService {
     failedSequence?: number;
   }> {
     await this.database.ensureReady();
-    const db = this.database.nativeDb();
+    const db = this.database.sql();
     const events = db
-      .collection<AuditEvent>("number_events")
+      .table<AuditEvent>("number_events")
       .find({ sequence: { $exists: true } })
       .sort({ sequence: 1 });
     let previousHash = GENESIS_HASH;
@@ -124,19 +134,19 @@ export class AuditService {
       previousHash = event.hash;
     }
     const head = await db
-      .collection<ChainHead>("audit_chain_heads")
-      .findOne({ _id: "global" });
+      .table<ChainHead>("audit_chain_heads")
+      .findOne({ id: "global" });
     return {
       valid: head?.sequence === count && head.hash === previousHash,
       count,
     };
   }
 
-  numberHistory(id: ObjectId, filter: HistoryFilter = {}) {
+  numberHistory(id: Id, filter: HistoryFilter = {}) {
     return this.history({ phoneNumberId: id }, filter);
   }
 
-  customerHistory(id: ObjectId, filter: HistoryFilter = {}) {
+  customerHistory(id: Id, filter: HistoryFilter = {}) {
     return this.history(
       { $or: [{ customerId: id }, { relatedCustomerIds: id }] },
       filter,
@@ -145,8 +155,8 @@ export class AuditService {
 
   private async history(
     scope: {
-      phoneNumberId?: ObjectId;
-      $or?: Array<{ customerId?: ObjectId; relatedCustomerIds?: ObjectId }>;
+      phoneNumberId?: Id;
+      $or?: Array<{ customerId?: Id; relatedCustomerIds?: Id }>;
     },
     filter: HistoryFilter,
   ) {
@@ -198,11 +208,9 @@ export class AuditService {
           }
         : {}),
     };
-    const collection = this.database
-      .nativeDb()
-      .collection<AuditEvent>("number_events");
+    const collection = this.database.sql().table<AuditEvent>("number_events");
     const [total, events] = await Promise.all([
-      collection.countDocuments(query),
+      collection.count(query),
       collection
         .find(query)
         .sort({ createdAt: -1, sequence: -1 })
@@ -212,14 +220,12 @@ export class AuditService {
     ]);
     return {
       items: events.map((event) => ({
-        id: event._id.toHexString(),
+        id: event.id,
         type: event.type,
-        actorId: event.actorId.toHexString(),
-        customerId: event.customerId?.toHexString(),
-        relatedCustomerIds: event.relatedCustomerIds?.map((id) =>
-          id.toHexString(),
-        ),
-        phoneNumberId: event.phoneNumberId?.toHexString(),
+        actorId: event.actorId,
+        customerId: event.customerId,
+        relatedCustomerIds: event.relatedCustomerIds?.map((id) => id),
+        phoneNumberId: event.phoneNumberId,
         previous: event.previous,
         next: event.next,
         createdAt: event.createdAt,

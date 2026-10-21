@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import { randomUUID } from "node:crypto";
-import { ObjectId } from "mongodb";
+import { Id, uuid } from "../src/database/query";
 import {
   CarrierRegistry,
   CarrierRegistryService,
@@ -13,12 +13,12 @@ import { AuditService } from "../src/ownership/audit.service";
 import { PortOperations } from "../src/ports/port.operations";
 import { PortRequests } from "../src/ports/port.requests";
 
-const baseUrl = process.env.DATAPHONE_TEST_MONGO_URL;
+const baseUrl = process.env.DATAPHONE_TEST_DATABASE_URL;
 const integration = baseUrl ? describe : describe.skip;
 integration("port submission workflow", () => {
   let database: DatabaseService;
-  let accountId: ObjectId;
-  let customerId: ObjectId;
+  let accountId: Id;
+  let customerId: Id;
   let registry: CarrierRegistryService;
   let requests: PortRequests;
   let operations: PortOperations;
@@ -32,27 +32,32 @@ integration("port submission workflow", () => {
     process.env.DATAPHONE_PORT_ENCRYPTION_KEY = Buffer.alloc(32, 3).toString(
       "base64",
     );
-    const url = new URL(baseUrl ?? "mongodb://127.0.0.1:27017/");
-    url.pathname = `/dataphone_phase9_operations_${randomUUID().replaceAll("-", "")}`;
+    const url = new URL(
+      baseUrl ?? "postgresql://dataphone:dataphone@127.0.0.1:54329/dataphone",
+    );
+    url.searchParams.set(
+      "schema",
+      `dataphone_phase9_operations_${randomUUID().replaceAll("-", "")}`,
+    );
     database = new DatabaseService(
-      loadConfig({ MONGO_URI: url.toString(), NODE_ENV: "test" }),
+      loadConfig({ DATABASE_URL: url.toString(), NODE_ENV: "test" }),
     );
     await database.ensureReady();
-    accountId = new ObjectId();
-    customerId = new ObjectId();
-    const carrierId = new ObjectId();
+    accountId = uuid();
+    customerId = uuid();
+    const carrierId = uuid();
     await database
-      .nativeDb()
-      .collection("carriers")
-      .insertOne({ _id: carrierId, code: "mock", displayName: "Mock" });
-    await database.nativeDb().collection("carrier_accounts").insertOne({
-      _id: accountId,
+      .sql()
+      .table("carriers")
+      .insertOne({ id: carrierId, code: "mock", displayName: "Mock" });
+    await database.sql().table("carrier_accounts").insertOne({
+      id: accountId,
       carrierId,
       externalAccountId: "sandbox-port",
       status: "active",
     });
-    await database.nativeDb().collection("customers").insertOne({
-      _id: customerId,
+    await database.sql().table("customers").insertOne({
+      id: customerId,
       name: "Port Customer",
       status: "active",
     });
@@ -91,7 +96,7 @@ integration("port submission workflow", () => {
   });
 
   afterAll(async () => {
-    if (database?.isConnected()) await database.nativeDb().dropDatabase();
+    if (database?.isConnected()) await database.dropTestSchema();
     await database?.close();
     if (previousKey === undefined)
       delete process.env.DATAPHONE_PORT_ENCRYPTION_KEY;
@@ -99,7 +104,7 @@ integration("port submission workflow", () => {
   });
 
   it("keeps FOC separate from completion and assigns only confirmed numbers", async () => {
-    const actorId = new ObjectId();
+    const actorId = uuid();
     const port = await requests.create(
       {
         customerId,
@@ -118,41 +123,34 @@ integration("port submission workflow", () => {
       },
       actorId,
     );
-    const submitted = await operations.submit(new ObjectId(port.id), actorId);
+    const submitted = await operations.submit(uuid(port.id), actorId);
     expect(submitted.status).toBe("SUBMITTED");
     expect(submitted.jobId).toBeDefined();
-    const pending = await operations.process(new ObjectId(port.id), context);
+    const pending = await operations.process(uuid(port.id), context);
     expect(pending.status).toBe("DATE_CONFIRMED");
-    expect((await requests.get(new ObjectId(port.id))).focDate).toBeDefined();
-    expect(
-      await database.nativeDb().collection("phone_numbers").countDocuments(),
-    ).toBe(0);
-    const complete = await operations.track(new ObjectId(port.id), context);
+    expect((await requests.get(uuid(port.id))).focDate).toBeDefined();
+    expect(await database.sql().table("phone_numbers").count()).toBe(0);
+    const complete = await operations.track(uuid(port.id), context);
     expect(complete.status).toBe("COMPLETED");
     expect(
       await database
-        .nativeDb()
-        .collection("phone_numbers")
-        .countDocuments({ e164: "+18043024189" }),
+        .sql()
+        .table("phone_numbers")
+        .count({ e164: "+18043024189" }),
     ).toBe(1);
     expect(
       await database
-        .nativeDb()
-        .collection("number_assignments")
-        .countDocuments({ customerId, active: true }),
+        .sql()
+        .table("number_assignments")
+        .count({ customerId, active: true }),
     ).toBe(1);
     expect((await new AuditService(database).verify()).valid).toBe(true);
-    await operations.track(new ObjectId(port.id), context);
-    expect(
-      await database
-        .nativeDb()
-        .collection("number_assignments")
-        .countDocuments(),
-    ).toBe(1);
+    await operations.track(uuid(port.id), context);
+    expect(await database.sql().table("number_assignments").count()).toBe(1);
   });
 
   it("corrects a rejected port and resubmits a new carrier order", async () => {
-    const actorId = new ObjectId();
+    const actorId = uuid();
     const port = await requests.create(
       {
         customerId,
@@ -171,7 +169,7 @@ integration("port submission workflow", () => {
       },
       actorId,
     );
-    const id = new ObjectId(port.id);
+    const id = uuid(port.id);
     await operations.submit(id, actorId);
     expect(
       (
@@ -197,7 +195,7 @@ integration("port submission workflow", () => {
   });
 
   it("keeps partial completion open and assigns only confirmed numbers", async () => {
-    const actorId = new ObjectId();
+    const actorId = uuid();
     const port = await requests.create(
       {
         customerId,
@@ -216,7 +214,7 @@ integration("port submission workflow", () => {
       },
       actorId,
     );
-    const id = new ObjectId(port.id);
+    const id = uuid(port.id);
     await operations.submit(id, actorId);
     expect(
       (
@@ -229,16 +227,13 @@ integration("port submission workflow", () => {
     ).toBe("SUBMITTED");
     expect((await requests.get(id)).unfulfilledCount).toBe(1);
     expect(
-      await database
-        .nativeDb()
-        .collection("number_assignments")
-        .countDocuments({
-          customerId,
-          active: true,
-        }),
+      await database.sql().table("number_assignments").count({
+        customerId,
+        active: true,
+      }),
     ).toBe(2);
     expect(
-      await database.nativeDb().collection("background_jobs").countDocuments({
+      await database.sql().table("background_jobs").count({
         type: "port.track",
         "payload.portId": port.id,
       }),

@@ -11,7 +11,7 @@ import { useAuthStore } from "./model/use-auth-store";
 import { useShellStore } from "./model/use-shell-store";
 
 const user = {
-  id: "507f1f77bcf86cd799439011",
+  id: "ac902665-6c90-55b4-b4ab-36c1e3d87cd8",
   email: "admin@example.test",
   roleKeys: ["SUPER_ADMIN"],
   permissions: ["users.manage", "inventory.view", "customers.view"],
@@ -267,7 +267,7 @@ it("creates a customer from the customer management page", async () => {
           externalId: string;
         };
         rows.push({
-          id: "507f1f77bcf86cd799439012",
+          id: "10bb07ef-2c43-5119-920c-da830352f069",
           name: body.name,
           externalId: body.externalId,
           status: "active",
@@ -312,7 +312,11 @@ it("opens customer numbers and audited history", async () => {
       permissions: [...user.permissions, "audit.view", "customers.manage"],
     },
   });
-  window.history.replaceState({}, "", "/customers/507f1f77bcf86cd799439012");
+  window.history.replaceState(
+    {},
+    "",
+    "/customers/10bb07ef-2c43-5119-920c-da830352f069",
+  );
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
@@ -337,7 +341,7 @@ it("opens customer numbers and audited history", async () => {
           ? {
               items: [
                 {
-                  id: "507f1f77bcf86cd799439013",
+                  id: "b7968cbe-a0ae-56bf-a4b9-7991e5ed6ad1",
                   e164: "+18043024183",
                   status: "active",
                 },
@@ -347,7 +351,7 @@ it("opens customer numbers and audited history", async () => {
             }
           : path.includes("/customers/")
             ? {
-                id: "507f1f77bcf86cd799439012",
+                id: "10bb07ef-2c43-5119-920c-da830352f069",
                 name: "Acme West",
                 externalId: "acme-west",
                 status: "active",
@@ -376,7 +380,11 @@ it("assigns an inventory number to a selected customer", async () => {
       permissions: [...user.permissions, "numbers.assign", "audit.view"],
     },
   });
-  window.history.replaceState({}, "", "/inventory/507f1f77bcf86cd799439013");
+  window.history.replaceState(
+    {},
+    "",
+    "/inventory/b7968cbe-a0ae-56bf-a4b9-7991e5ed6ad1",
+  );
   let assigned = false;
   const request = vi.fn(
     async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -389,9 +397,11 @@ it("assigns an inventory number to a selected customer", async () => {
           json: async () => ({ id: "assignment-1" }),
         };
       }
-      const data = path.includes("/numbers/507f1f77bcf86cd799439013/history")
+      const data = path.includes(
+        "/numbers/b7968cbe-a0ae-56bf-a4b9-7991e5ed6ad1/history",
+      )
         ? { items: [], total: 0, pageSize: 25 }
-        : path.includes("/numbers/507f1f77bcf86cd799439013")
+        : path.includes("/numbers/b7968cbe-a0ae-56bf-a4b9-7991e5ed6ad1")
           ? {
               e164: "+18043024183",
               status: "active",
@@ -401,14 +411,19 @@ it("assigns an inventory number to a selected customer", async () => {
               lastSeenAt: "2026-10-11T00:00:00Z",
               holdings: [],
               assignments: assigned
-                ? [{ customerId: "507f1f77bcf86cd799439012", active: true }]
+                ? [
+                    {
+                      customerId: "10bb07ef-2c43-5119-920c-da830352f069",
+                      active: true,
+                    },
+                  ]
                 : [],
             }
           : path.includes("/customers?")
             ? {
                 items: [
                   {
-                    id: "507f1f77bcf86cd799439012",
+                    id: "10bb07ef-2c43-5119-920c-da830352f069",
                     name: "Acme West",
                     status: "active",
                   },
@@ -423,7 +438,7 @@ it("assigns an inventory number to a selected customer", async () => {
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: "Assign number" }));
   fireEvent.change(screen.getByRole("combobox", { name: "Customer" }), {
-    target: { value: "507f1f77bcf86cd799439012" },
+    target: { value: "10bb07ef-2c43-5119-920c-da830352f069" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Confirm assignment" }));
   await waitFor(() =>
@@ -451,13 +466,13 @@ it("bulk assigns selected inventory numbers", async () => {
         ? {
             items: [
               {
-                id: "507f1f77bcf86cd799439013",
+                id: "b7968cbe-a0ae-56bf-a4b9-7991e5ed6ad1",
                 e164: "+18043024183",
                 status: "active",
                 updatedAt: "2026-10-11T00:00:00Z",
               },
               {
-                id: "507f1f77bcf86cd799439014",
+                id: "db351561-4737-59a4-8d08-8335a86c96f8",
                 e164: "+18042121778",
                 status: "active",
                 updatedAt: "2026-10-11T00:00:00Z",
@@ -470,7 +485,7 @@ it("bulk assigns selected inventory numbers", async () => {
           ? {
               items: [
                 {
-                  id: "507f1f77bcf86cd799439012",
+                  id: "10bb07ef-2c43-5119-920c-da830352f069",
                   name: "Acme West",
                   status: "active",
                 },
@@ -495,7 +510,7 @@ it("bulk assigns selected inventory numbers", async () => {
   );
   fireEvent.click(screen.getByRole("button", { name: "Assign selected" }));
   fireEvent.change(screen.getByRole("combobox", { name: "Customer" }), {
-    target: { value: "507f1f77bcf86cd799439012" },
+    target: { value: "10bb07ef-2c43-5119-920c-da830352f069" },
   });
   fireEvent.click(
     screen.getByRole("button", { name: "Confirm bulk assignment" }),
@@ -514,9 +529,13 @@ it("transfers and then unassigns an owned number", async () => {
     accessToken: "staff-token",
     user: { ...user, permissions: [...user.permissions, "numbers.assign"] },
   });
-  window.history.replaceState({}, "", "/inventory/507f1f77bcf86cd799439013");
-  const firstCustomer = "507f1f77bcf86cd799439012";
-  const secondCustomer = "507f1f77bcf86cd799439015";
+  window.history.replaceState(
+    {},
+    "",
+    "/inventory/b7968cbe-a0ae-56bf-a4b9-7991e5ed6ad1",
+  );
+  const firstCustomer = "10bb07ef-2c43-5119-920c-da830352f069";
+  const secondCustomer = "7931062a-7427-5cdc-8ea8-bf15d36f6a2a";
   let current: string | null = firstCustomer;
   const request = vi.fn(
     async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -537,7 +556,7 @@ it("transfers and then unassigns an owned number", async () => {
             ],
             total: 2,
           }
-        : path.includes("/numbers/507f1f77bcf86cd799439013")
+        : path.includes("/numbers/b7968cbe-a0ae-56bf-a4b9-7991e5ed6ad1")
           ? {
               e164: "+18043024183",
               status: "active",

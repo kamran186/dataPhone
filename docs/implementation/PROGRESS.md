@@ -1,29 +1,22 @@
-# DataPhone implementation progress
+# DataPhone implementation status
 
-Each phase is created from the latest verified `Prod`. A phase is marked `PUSHED` only after both its branch and `Prod` are confirmed on GitHub. Completion is described by checked tasks in each phase report; no percentage is inferred.
+The application uses PostgreSQL 17, a NestJS API and worker, and a React frontend. See [delivery and verification](postgresql-carrier-delivery.md) for the latest tested results.
 
-| Phase | Name | Status | Implementation completion | Test results | Commit hash | Push status | Blockers |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 0 | Architecture discovery and validation | COMPLETED | Architecture documents and local feasibility probe implemented | 7/7 local checks passed; dependency audit clear | `f852f1a6d57e6b3abc41f5db33a72d01d9a18806` | Verified on `phase-0-architecture` and `Prod` | Peerless WSDL and carrier credentials absent |
-| 1 | Project foundation | COMPLETED | API, web, shared package, and Compose foundation implemented | API 7/7, web 1/1, type/lint/format/build, audit clear, Compose smoke passed | `f0723f256a123d23ef8d92661efaf5413d9908f7` | Verified on `phase-1-foundation` and `Prod` | — |
-| 2 | Database and TypeORM infrastructure | COMPLETED | Core models, schema indexes, native transactions, concurrency, GridFS, and role seed implemented | API 18/18, web 1/1, type/lint/format/build, audit clear, container restart and recovery passed | `680470c5b9e18430e25820cb513cfdf30e7fa486` | Verified on `phase-2-database` and `Prod` | — |
-| 3 | Authentication and user management | COMPLETED | API authentication, RBAC, administrator bootstrap, and protected browser shell implemented | API 31/31, web 3/3, CLI and direct API smoke, static gates and audit passed | `0594267` | Verified on `phase-3-authentication` and `Prod` | Docker Desktop I/O failure prevents container smoke; native API smoke passed |
-| 4 | Multi-carrier adapter framework | COMPLETED | Typed registry, Bandwidth read-only inventory, explicit Peerless/BulkVS unsupported paths, and mock implemented | API 39/39, web 3/3, static gates and audit passed | `743f904` | Verified on `phase-4-carrier-framework` and `Prod` | Peerless/BulkVS contracts and live credentials absent; Docker Desktop I/O failure |
-| 5 | Background jobs and live streaming | COMPLETED | Durable jobs, leased RxJS worker, protected SSE, and browser job view implemented | API 48/48, web 5/5, static gates and audit passed | `c9be6f9` | Verified on `phase-5-background-jobs` and `Prod` | Docker Desktop I/O failure prevents container smoke |
-| 6 | Unified DID inventory | COMPLETED | Normalized cross-carrier inventory, sync, reconciliation, search, exports, and browser views implemented | API 55/55, web 6/6, static gates and audit passed | `de0aebaf745633cd3ea9ff80c88fb870eb35d96d` | Verified on `phase-6-unified-inventory` and `Prod` | Live credentials absent; Docker Desktop I/O failure |
-| 7 | Customers, assignments and audit history | COMPLETED | Customer records, transactional ownership periods, global audit chain, protected histories, and browser workflows implemented | API 64/64, web 11/11, static gates and audit passed | `2fcffa93feb50a24f9884b6f38630364eedd4d25` | Verified on `phase-7-customers-assignments-audit` and `Prod` | External hash checkpoint and Docker Desktop smoke pending |
-| 8 | Number search, purchase and disconnect | COMPLETED | Carrier search, idempotent orders, confirmed ownership, tracked disconnects, and browser workflows implemented | API 73/73, web 13/13, static gates and audit passed | `4f1933588381bdd870b26c38e224a2f94fa1483f` | Verified on `phase-8-number-purchase-disconnect` and `Prod` | Real billable operations require separate authorization; Docker Desktop smoke pending |
-| 9 | Port-in management and documents | COMPLETED | Port drafts, encrypted documents, mock submission and tracking, browser workflows | API 84/84, web 15/15, static gates and audit passed | `16fcfa7` | Verified on `phase-9-port-in-documents` and `Prod` | Real port submission requires separate authorization; Docker smoke pending |
-| 10 | Dashboard and reporting | COMPLETED | Dashboard metrics, eight reports, paged search, CSV/Excel exports, responsive role-based browser views | API 87/87, web 18/18, static gates and audit passed | `79b2a06` | Verified on `phase-10-dashboard-reporting` and `Prod` | Live metrics exclude billing/routing use; Docker smoke pending |
-| 11 | Security, testing and final delivery | COMPLETED | Security/recovery fixes, Chrome workflows, backup drill, production/operator/API/carrier guides, acceptance report | API 89/89, web 18/18, Playwright 2/2, static gates, frozen install, audit passed | `14a749ce292407e42ac1c0112e8c769eec7a994a` | Verified on `phase-11-security-testing-delivery` and `Prod` | Real carrier and Docker container acceptance still require external access |
+| Area | Status |
+| --- | --- |
+| SQL schema, migrations, UUIDs, constraints, initialization, and seeds | Implemented and verified |
+| Authentication, refresh rotation, permissions, and administrator bootstrap | Implemented and verified |
+| Customer records, assignments, ownership periods, and audit chain | Implemented and verified |
+| Durable jobs, leases, retries, restart recovery, and SSE | Implemented and verified |
+| Unified inventory, reconciliation, filters, and exports | Implemented and verified |
+| Peerless SOAP, BulkVS REST, Bandwidth v2 inventory/search | Implemented and contract tested; client credentials pending |
+| Viewer access to available-number search | Implemented and verified |
+| Simulated purchase, disconnect, and port workflows | Implemented and verified |
+| Encrypted port credentials and document storage | Implemented and verified |
+| Dashboard, eight reports, CSV/Excel exports | Implemented and verified |
+| Local PostgreSQL Compose deployment | Built and smoke tested |
+| Live carrier account acceptance | Waiting for client test credentials |
+| Live purchasing, disconnecting, and port submission | Disabled; outside the current delivery |
+| Independent audit checkpoints | Pending operational decision |
 
-## Phase 0 task checklist
-
-- [x] Inspect repository, source, configuration, and environment.
-- [x] Validate TypeORM and native MongoDB CRUD against one database.
-- [x] Validate transactions, change streams, and GridFS on a local replica set.
-- [x] Validate NestJS/RxJS dependency injection and configuration input.
-- [x] Review public carrier documentation and record capability uncertainty.
-- [x] Write system, frontend, backend, database, and feasibility documentation.
-- [x] Validate Docker deployment when the daemon is available.
-- [ ] Validate Peerless operations when WSDL and authorized account access are available.
+Delivery target: `Prod`. No remote push is implied by local verification or a local merge.

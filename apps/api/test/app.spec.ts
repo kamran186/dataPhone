@@ -7,17 +7,17 @@ import { DatabaseHealthService } from "../src/database/database-health.service";
 import { DatabaseService } from "../src/database/database.service";
 
 describe("configuration", () => {
-  it("requires a named MongoDB database", () => {
+  it("requires a named PostgreSQL database", () => {
     expect(() =>
-      loadConfig({ MONGO_URI: "mongodb://localhost:27017/" }),
+      loadConfig({ DATABASE_URL: "postgresql://localhost:5432/" }),
     ).toThrow("explicit database name");
-    expect(() => loadConfig({})).toThrow("MONGO_URI is required");
+    expect(() => loadConfig({})).toThrow("DATABASE_URL is required");
   });
 
   it("rejects invalid ports", () => {
     expect(() =>
       loadConfig({
-        MONGO_URI: "mongodb://localhost:27017/dataphone",
+        DATABASE_URL: "postgresql://localhost:5432/dataphone",
         PORT: "0",
       }),
     ).toThrow("PORT");
@@ -27,27 +27,27 @@ describe("configuration", () => {
     expect(() =>
       loadConfig({
         NODE_ENV: "production",
-        MONGO_URI: "mongodb://localhost:27017/dataphone",
+        DATABASE_URL: "postgresql://localhost:5432/dataphone",
       }),
     ).toThrow("JWT_SECRET is required");
     expect(() =>
       loadConfig({
         NODE_ENV: "production",
-        MONGO_URI: "mongodb://localhost:27017/dataphone",
+        DATABASE_URL: "postgresql://localhost:5432/dataphone",
         JWT_SECRET: "too-short",
       }),
     ).toThrow("at least 32 bytes");
     expect(() =>
       loadConfig({
         NODE_ENV: "production",
-        MONGO_URI: "mongodb://localhost:27017/dataphone",
+        DATABASE_URL: "postgresql://localhost:5432/dataphone",
         JWT_SECRET: "x".repeat(32),
       }),
     ).toThrow("DATAPHONE_PORT_ENCRYPTION_KEY is required");
     expect(() =>
       loadConfig({
         NODE_ENV: "production",
-        MONGO_URI: "mongodb://localhost:27017/dataphone",
+        DATABASE_URL: "postgresql://localhost:5432/dataphone",
         JWT_SECRET: "x".repeat(32),
         DATAPHONE_PORT_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
       }),
@@ -59,8 +59,8 @@ describe("HTTP foundation", () => {
   let app: INestApplication;
 
   beforeAll(async () => {
-    process.env.MONGO_URI ??=
-      "mongodb://127.0.0.1:27186/dataphone_phase1?replicaSet=rs_dataphone_phase0";
+    process.env.DATABASE_URL ??=
+      "postgresql://dataphone:dataphone@127.0.0.1:54329/dataphone";
     app = await createApp();
     await app.init();
   });
@@ -84,17 +84,16 @@ describe("HTTP foundation", () => {
     expect(response.body.name).toBe("DataPhone");
   });
 
-  it("reports database readiness when an isolated replica set is available", async () => {
-    if (!process.env.DATAPHONE_TEST_MONGO_URL) return;
+  it("reports database readiness when an isolated PostgreSQL database is available", async () => {
+    if (!process.env.DATAPHONE_TEST_DATABASE_URL) return;
     await request(app.getHttpServer()).get("/api/v1/health/ready").expect(200);
     const database = app.get(DatabaseService);
     expect(
-      await database
-        .nativeDb()
-        .collection("schema_migrations")
-        .countDocuments({
-          _id: "core-v1" as never,
-        }),
+      (
+        await database
+          .sql()
+          .query("SELECT count(*)::int AS count FROM schema_migrations")
+      ).rows[0].count,
     ).toBe(1);
   });
 

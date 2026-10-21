@@ -1,10 +1,15 @@
 import { BadRequestException } from "@nestjs/common";
-import { ObjectId } from "mongodb";
+import { Id, uuid } from "../database/query";
 
-export function objectId(raw: string): ObjectId {
-  if (typeof raw !== "string" || !/^[a-f\d]{24}$/i.test(raw))
+export function recordId(raw: string): Id {
+  if (
+    typeof raw !== "string" ||
+    !/^[a-f\d]{8}-[a-f\d]{4}-[1-5][a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/i.test(
+      raw,
+    )
+  )
     throw new BadRequestException("Invalid ID");
-  return new ObjectId(raw);
+  return uuid(raw);
 }
 
 export function pageQuery(raw: Record<string, string | undefined>) {
