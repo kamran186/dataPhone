@@ -112,8 +112,12 @@ test("port wizard submits a draft and removes secrets from the screen", async ({
     ["City", "Richmond"],
     ["State", "VA"],
     ["Postal code", "23220"],
-  ])
-    await page.getByLabel(name, { exact: true }).fill(value);
+  ]) {
+    await page.getByLabel(new RegExp(`^${name}`)).fill(value);
+    if (name === "Current provider")
+      await page.getByRole("button", { name: "Continue" }).click();
+  }
+  await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("button", { name: "Save draft" }).click();
   await expect(page.getByText(/Draft created/)).toBeVisible();
   await expect(page.getByText("sensitive-123")).toHaveCount(0);

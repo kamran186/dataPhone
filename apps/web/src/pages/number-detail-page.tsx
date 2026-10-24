@@ -19,6 +19,9 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAuthStore } from "../app/model/use-auth-store";
 import { subscribeJobEvents } from "../entities/jobs/api/job-stream";
+import { ConnectionPath } from "../shared/ui/connection-path";
+import { CopyAction } from "../shared/ui/data-tools";
+import { StatusBadge } from "../shared/ui/status-badge";
 import { authorizedFetch, getJson } from "../shared/api/client";
 
 interface NumberDetail {
@@ -241,9 +244,20 @@ export function NumberDetailPage() {
       )}
       {detail.data && (
         <>
-          <Typography variant="h4" component="h1">
-            {detail.data.e164}
-          </Typography>
+          <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+            <Typography variant="h4" component="h1">
+              {detail.data.e164}
+            </Typography>
+            <CopyAction value={detail.data.e164} />
+            <StatusBadge status={detail.data.status} />
+          </Stack>
+          <ConnectionPath
+            source={detail.data.carrier ?? "Carrier unknown"}
+            destination={
+              active ? (activeName ?? active.customerId) : "Unassigned"
+            }
+            caption="Recorded carrier holding → current customer assignment"
+          />
           <Paper sx={{ p: 2 }}>
             <Typography>Status: {detail.data.status}</Typography>
             <Typography>Carrier: {detail.data.carrier ?? "Unknown"}</Typography>
@@ -286,7 +300,7 @@ export function NumberDetailPage() {
             </Typography>
           )}
           {canAssign && (
-            <Stack direction="row" spacing={1}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
               {!active && detail.data.status === "active" && (
                 <Button variant="contained" onClick={() => setDialog("assign")}>
                   Assign number
@@ -378,7 +392,7 @@ export function NumberDetailPage() {
             </Paper>
           ))}
           {history.data && (
-            <Stack direction="row" spacing={1}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
               <Button
                 disabled={historyPage === 1}
                 onClick={() => setHistoryPage(historyPage - 1)}
@@ -412,6 +426,17 @@ export function NumberDetailPage() {
         </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
+            {dialog === "transfer" && (
+              <ConnectionPath
+                source={activeName ?? active?.customerId ?? "Current customer"}
+                destination={
+                  customers.data?.items.find(
+                    (item) => item.id === selectedCustomer,
+                  )?.name ?? "Choose destination"
+                }
+                caption="Proposed transfer · applied only after confirmation"
+              />
+            )}
             {dialog !== "unassign" && (
               <>
                 <TextField

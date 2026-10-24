@@ -57,7 +57,7 @@ it("shows verified dashboard counts and the usage caveat", async () => {
   render(<App />);
   expect(await screen.findByText("Potentially unused")).toBeInTheDocument();
   expect(
-    screen.getByText(/Billing and routing usage are outside this POC/),
+    await screen.findByText(/Billing and routing usage are outside this POC/),
   ).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Open navigation" }));
   expect(screen.getByRole("link", { name: "Reports" })).toBeInTheDocument();

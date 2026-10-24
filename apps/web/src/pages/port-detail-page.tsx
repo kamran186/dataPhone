@@ -1,5 +1,8 @@
 import {
   Alert,
+  Stepper,
+  Step,
+  StepLabel,
   Button,
   CircularProgress,
   Paper,
@@ -11,6 +14,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { subscribeJobEvents } from "../entities/jobs/api/job-stream";
+import { StatusBadge } from "../shared/ui/status-badge";
+import { ConnectionPath } from "../shared/ui/connection-path";
 import { authorizedFetch, getJson } from "../shared/api/client";
 
 interface Port {
@@ -202,11 +207,63 @@ export function PortDetailPage() {
       {port.data && (
         <>
           <Paper sx={{ p: 3 }}>
+            <Stepper
+              activeStep={
+                port.data.status === "REJECTED"
+                  ? 1
+                  : [
+                      "DRAFT",
+                      "SUBMITTED",
+                      "DATE_CONFIRMED",
+                      "COMPLETED",
+                    ].indexOf(port.data.status)
+              }
+              alternativeLabel
+              sx={{ mb: 3 }}
+            >
+              {["Draft", "Submitted", "Date confirmed", "Completed"].map(
+                (stage, index) => (
+                  <Step
+                    key={stage}
+                    completed={
+                      port.data?.status === "COMPLETED" ||
+                      index <
+                        [
+                          "DRAFT",
+                          "SUBMITTED",
+                          "DATE_CONFIRMED",
+                          "COMPLETED",
+                        ].indexOf(port.data?.status ?? "")
+                    }
+                  >
+                    <StepLabel
+                      error={port.data?.status === "REJECTED" && index === 1}
+                    >
+                      {stage}
+                    </StepLabel>
+                  </Step>
+                ),
+              )}
+            </Stepper>
+            {["REJECTED", "CANCELLED"].includes(port.data.status) && (
+              <Alert
+                severity={port.data.status === "REJECTED" ? "warning" : "info"}
+                sx={{ mb: 2 }}
+              >
+                This request is {label(port.data.status).toLowerCase()}.
+              </Alert>
+            )}
+            <ConnectionPath
+              source={port.data.currentProvider}
+              destination={carrier?.code ?? "Destination carrier account"}
+              caption="Requested network transition · completion follows the recorded port status"
+            />
+
             <Stack spacing={1}>
               <Typography variant="h6">
                 {port.data.numbers.join(", ")}
               </Typography>
-              <Typography>Status: {label(port.data.status)}</Typography>
+              <StatusBadge status={port.data.status} />
               <Typography>
                 Current provider: {port.data.currentProvider}
               </Typography>

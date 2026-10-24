@@ -1,5 +1,9 @@
 import {
   Alert,
+  Stepper,
+  Step,
+  StepLabel,
+  TableContainer,
   Button,
   Checkbox,
   CircularProgress,
@@ -21,6 +25,10 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { subscribeJobEvents } from "../entities/jobs/api/job-stream";
 import { authorizedFetch, getJson } from "../shared/api/client";
+import { StatusBadge } from "../shared/ui/status-badge";
+import { CopyAction } from "../shared/ui/data-tools";
+import { Icon } from "../shared/ui/icon";
+import { EmptyState } from "../shared/ui/empty-state";
 import { PageHeader } from "../shared/ui/page-header";
 
 interface Offer {
@@ -145,7 +153,8 @@ export function PurchasesPage({ readOnly = false }: { readOnly?: boolean }) {
       setError("Enter an area code, city, state, or number pattern.");
       return;
     }
-    setSubmitted(params.toString());
+    if (submitted === params.toString()) void search.refetch();
+    else setSubmitted(params.toString());
   }
 
   function toggle(offer: Offer) {
@@ -213,6 +222,21 @@ export function PurchasesPage({ readOnly = false }: { readOnly?: boolean }) {
         }
       />
       {!readOnly && (
+        <Stepper
+          activeStep={lastOrderId ? 2 : chosen.length ? 1 : 0}
+          alternativeLabel
+          sx={{ maxWidth: 620, width: "100%", mx: "auto" }}
+        >
+          {["Discover numbers", "Choose & assign", "Track order"].map(
+            (label) => (
+              <Step key={label}>
+                <StepLabel>{label}</StepLabel>
+              </Step>
+            ),
+          )}
+        </Stepper>
+      )}
+      {!readOnly && (
         <Alert severity="info">
           Purchase orders are available only for the mock carrier. Live billable
           purchases require separate authorization.
@@ -221,7 +245,15 @@ export function PurchasesPage({ readOnly = false }: { readOnly?: boolean }) {
       <Paper sx={{ p: 2 }}>
         <Stack spacing={2}>
           <Typography variant="h6">Search available numbers</Typography>
-          <Stack direction={{ xs: "column", md: "row" }} spacing={1}>
+          <Stack
+            direction={{ xs: "column", md: "row" }}
+            spacing={1}
+            useFlexGap
+            sx={{
+              flexWrap: "wrap",
+              "& > .MuiTextField-root": { flex: 1, minWidth: 140 },
+            }}
+          >
             <TextField
               label="Area code"
               value={areaCode}
@@ -244,12 +276,23 @@ export function PurchasesPage({ readOnly = false }: { readOnly?: boolean }) {
               value={pattern}
               onChange={(event) => setPattern(event.target.value)}
             />
-            <Button variant="contained" onClick={runSearch}>
+            <Button
+              variant="contained"
+              disabled={search.isFetching}
+              startIcon={<Icon name="search" sx={{ fontSize: 16 }} />}
+              onClick={runSearch}
+            >
               Search available numbers
             </Button>
           </Stack>
         </Stack>
       </Paper>
+      {!submitted && (
+        <EmptyState
+          title="Your next connection starts here"
+          detail="Search by area code, city, state, or number pattern to discover available numbers across your connected carriers."
+        />
+      )}
       {error && <Alert severity="error">{error}</Alert>}
       {notice && <Alert severity="success">{notice}</Alert>}
       {progress && <Alert severity="info">Order progress: {progress}</Alert>}
@@ -297,49 +340,69 @@ export function PurchasesPage({ readOnly = false }: { readOnly?: boolean }) {
         <Alert severity="info">No numbers matched this search.</Alert>
       )}
       {offers.length > 0 && (
-        <Paper sx={{ overflowX: "auto" }}>
-          <Table>
-            <TableHead>
-              <TableRow>
-                {!readOnly && <TableCell>Select</TableCell>}
-                <TableCell>Number</TableCell>
-                <TableCell>Carrier</TableCell>
-                <TableCell>Location</TableCell>
-                <TableCell>Monthly</TableCell>
-                <TableCell>Setup</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {offers.map((offer) => (
-                <TableRow key={offerKey(offer)}>
-                  {!readOnly && (
-                    <TableCell>
-                      <Checkbox
-                        checked={selected.includes(offerKey(offer))}
-                        onChange={() => toggle(offer)}
-                        slotProps={{
-                          input: { "aria-label": `Select ${offer.e164}` },
-                        }}
-                      />
-                    </TableCell>
-                  )}
-                  <TableCell>{offer.e164}</TableCell>
-                  <TableCell>{offer.carrierName}</TableCell>
-                  <TableCell>
-                    {[offer.locality, offer.region]
-                      .filter(Boolean)
-                      .join(", ") || "—"}
-                  </TableCell>
-                  <TableCell>
-                    {price(offer.monthlyPriceCents, offer.currency)}/mo
-                  </TableCell>
-                  <TableCell>
-                    {price(offer.setupPriceCents, offer.currency)}
-                  </TableCell>
+        <Paper sx={{ overflow: "hidden" }}>
+          <TableContainer
+            sx={{ maxHeight: "65vh" }}
+            role="region"
+            tabIndex={0}
+            aria-label="Available numbers table"
+          >
+            <Table stickyHeader aria-label="Available numbers">
+              <TableHead>
+                <TableRow>
+                  {!readOnly && <TableCell>Select</TableCell>}
+                  <TableCell>Number</TableCell>
+                  <TableCell>Carrier</TableCell>
+                  <TableCell>Location</TableCell>
+                  <TableCell>Monthly</TableCell>
+                  <TableCell>Setup</TableCell>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHead>
+              <TableBody>
+                {offers.map((offer) => (
+                  <TableRow key={offerKey(offer)}>
+                    {!readOnly && (
+                      <TableCell>
+                        <Checkbox
+                          checked={selected.includes(offerKey(offer))}
+                          onChange={() => toggle(offer)}
+                          slotProps={{
+                            input: { "aria-label": `Select ${offer.e164}` },
+                          }}
+                        />
+                      </TableCell>
+                    )}
+                    <TableCell>
+                      <Stack
+                        direction="row"
+                        sx={{
+                          alignItems: "center",
+                          gap: 0.5,
+                          fontFamily: "ui-monospace, monospace",
+                          fontWeight: 600,
+                        }}
+                      >
+                        {offer.e164}
+                        <CopyAction value={offer.e164} />
+                      </Stack>
+                    </TableCell>
+                    <TableCell>{offer.carrierName}</TableCell>
+                    <TableCell>
+                      {[offer.locality, offer.region]
+                        .filter(Boolean)
+                        .join(", ") || "—"}
+                    </TableCell>
+                    <TableCell>
+                      {price(offer.monthlyPriceCents, offer.currency)}/mo
+                    </TableCell>
+                    <TableCell>
+                      {price(offer.setupPriceCents, offer.currency)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
         </Paper>
       )}
       {!readOnly && chosen.length > 0 && (
@@ -405,7 +468,7 @@ export function PurchasesPage({ readOnly = false }: { readOnly?: boolean }) {
         <Paper key={order.id} sx={{ p: 2 }}>
           <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
             <Typography>Order {order.id}</Typography>
-            <Typography>Status: {order.status}</Typography>
+            <StatusBadge status={order.status} />
             <Typography>{order.nativeIds.length} requested</Typography>
             <Link to="/jobs">View job progress</Link>
           </Stack>

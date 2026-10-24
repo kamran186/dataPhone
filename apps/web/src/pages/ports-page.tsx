@@ -1,5 +1,9 @@
 import {
   Alert,
+  Box,
+  Stepper,
+  Step,
+  StepLabel,
   Button,
   CircularProgress,
   MenuItem,
@@ -12,6 +16,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { authorizedFetch, getJson } from "../shared/api/client";
+import { StatusBadge } from "../shared/ui/status-badge";
+import { Icon } from "../shared/ui/icon";
 import { PageHeader } from "../shared/ui/page-header";
 
 interface Port {
@@ -48,6 +54,7 @@ const empty = {
 
 export function PortsPage() {
   const queryClient = useQueryClient();
+  const [draftStep, setDraftStep] = useState(0);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(empty);
   const [error, setError] = useState("");
@@ -103,6 +110,7 @@ export function PortsPage() {
       if (!response.ok)
         throw new Error(`Draft could not be saved (${response.status})`);
       const draft = (await response.json()) as Port;
+      setDraftStep(0);
       setForm(empty);
       setOpen(false);
       setNotice(`Draft created: ${draft.numbers.join(", ")}`);
@@ -128,7 +136,15 @@ export function PortsPage() {
       {notice && <Alert severity="success">{notice}</Alert>}
       {error && <Alert severity="error">{error}</Alert>}
       <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-        <Button variant="contained" onClick={() => setOpen((value) => !value)}>
+        <Button
+          variant="contained"
+          startIcon={<Icon name="plus" sx={{ fontSize: 15 }} />}
+          onClick={() => {
+            if (open) setForm(empty);
+            setDraftStep(0);
+            setOpen((value) => !value);
+          }}
+        >
           New port request
         </Button>
         <TextField
@@ -157,78 +173,212 @@ export function PortsPage() {
         <Paper sx={{ p: 3 }}>
           <Stack spacing={2}>
             <Typography variant="h6">New port request</Typography>
-            <TextField
-              select
-              slotProps={{ select: { native: true } }}
-              label="Customer"
-              value={form.customerId}
-              onChange={(event) => set("customerId", event.target.value)}
-            >
-              <option value="" />
-              {customers.data?.items
-                .filter((item) => item.status === "active")
-                .map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}
-                  </option>
+            <Stepper activeStep={draftStep} alternativeLabel sx={{ pb: 2 }}>
+              {["Connection", "Account details", "Review"].map((label) => (
+                <Step key={label}>
+                  <StepLabel>{label}</StepLabel>
+                </Step>
+              ))}
+            </Stepper>
+            {draftStep === 0 && (
+              <>
+                <TextField
+                  select
+                  slotProps={{ select: { native: true } }}
+                  label="Customer"
+                  value={form.customerId}
+                  onChange={(event) => set("customerId", event.target.value)}
+                >
+                  <option value="" />
+                  {customers.data?.items
+                    .filter((item) => item.status === "active")
+                    .map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name}
+                      </option>
+                    ))}
+                </TextField>
+                <TextField
+                  select
+                  slotProps={{ select: { native: true } }}
+                  label="Destination carrier account"
+                  value={form.carrierAccountId}
+                  onChange={(event) =>
+                    set("carrierAccountId", event.target.value)
+                  }
+                >
+                  <option value="" />
+                  {carriers.data?.flatMap((carrier) =>
+                    carrier.accounts
+                      .filter((account) => account.status === "active")
+                      .map((account) => (
+                        <option key={account.id} value={account.id}>
+                          {carrier.displayName} · {account.externalAccountId}
+                        </option>
+                      )),
+                  )}
+                </TextField>
+                <TextField
+                  label="Numbers to port"
+                  multiline
+                  required
+                  helperText="Use E.164 numbers, separated by commas or new lines."
+                  value={form.numbers}
+                  onChange={(event) => set("numbers", event.target.value)}
+                />
+                <TextField
+                  label="Current provider"
+                  required
+                  value={form.currentProvider}
+                  onChange={(event) =>
+                    set("currentProvider", event.target.value)
+                  }
+                />
+              </>
+            )}
+            {draftStep === 1 && (
+              <Box
+                sx={{
+                  display: "grid",
+                  gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" },
+                  gap: 2,
+                }}
+              >
+                {(
+                  [
+                    ["accountName", "Account name"],
+                    ["accountNumber", "Account number"],
+                    ["pin", "Account PIN"],
+                    ["line1", "Address line 1"],
+                    ["line2", "Address line 2"],
+                    ["city", "City"],
+                    ["region", "State"],
+                    ["postalCode", "Postal code"],
+                  ] as Array<[keyof typeof empty, string]>
+                ).map(([key, label]) => (
+                  <TextField
+                    key={key}
+                    label={label}
+                    required={!["line2", "pin"].includes(key)}
+                    name={`port-${key}`}
+                    autoComplete={
+                      key === "accountNumber" || key === "pin"
+                        ? "new-password"
+                        : "off"
+                    }
+                    value={form[key]}
+                    onChange={(event) => set(key, event.target.value)}
+                    type={
+                      key === "accountNumber" || key === "pin"
+                        ? "password"
+                        : "text"
+                    }
+                  />
                 ))}
-            </TextField>
-            <TextField
-              select
-              slotProps={{ select: { native: true } }}
-              label="Destination carrier account"
-              value={form.carrierAccountId}
-              onChange={(event) => set("carrierAccountId", event.target.value)}
+              </Box>
+            )}
+            {draftStep === 2 && (
+              <Box sx={{ p: 3, bgcolor: "var(--dp-raised)", borderRadius: 2 }}>
+                <Typography variant="h6" sx={{ mb: 2 }}>
+                  Review your transition
+                </Typography>
+                {[
+                  [
+                    "Customer",
+                    customers.data?.items.find(
+                      (item) => item.id === form.customerId,
+                    )?.name ?? "Selected customer",
+                  ],
+                  ["Numbers", form.numbers],
+                  ["Current provider", form.currentProvider],
+                  ["Account name", form.accountName],
+                  [
+                    "Account credentials",
+                    "Provided securely · hidden from review",
+                  ],
+                  [
+                    "Service address",
+                    [
+                      form.line1,
+                      form.line2,
+                      form.city,
+                      form.region,
+                      form.postalCode,
+                    ]
+                      .filter(Boolean)
+                      .join(", "),
+                  ],
+                ].map(([label, value]) => (
+                  <Box key={label} sx={{ mb: 1.5 }}>
+                    <Typography variant="caption" color="text.secondary">
+                      {label}
+                    </Typography>
+                    <Typography
+                      variant="body2"
+                      sx={{ overflowWrap: "anywhere" }}
+                    >
+                      {value}
+                    </Typography>
+                  </Box>
+                ))}
+                <Alert severity="info">
+                  Saving creates a draft. Carrier submission happens from the
+                  request details.
+                </Alert>
+              </Box>
+            )}
+            <Stack
+              direction="row"
+              spacing={1}
+              sx={{ justifyContent: "flex-end" }}
             >
-              <option value="" />
-              {carriers.data?.flatMap((carrier) =>
-                carrier.accounts
-                  .filter((account) => account.status === "active")
-                  .map((account) => (
-                    <option key={account.id} value={account.id}>
-                      {carrier.displayName} · {account.externalAccountId}
-                    </option>
-                  )),
+              {draftStep > 0 && (
+                <Button
+                  onClick={() => setDraftStep((step) => step - 1)}
+                  disabled={saving}
+                >
+                  Back
+                </Button>
               )}
-            </TextField>
-            {(
-              [
-                ["numbers", "Numbers to port"],
-                ["currentProvider", "Current provider"],
-                ["accountName", "Account name"],
-                ["accountNumber", "Account number"],
-                ["pin", "Account PIN"],
-                ["line1", "Address line 1"],
-                ["line2", "Address line 2"],
-                ["city", "City"],
-                ["region", "State"],
-                ["postalCode", "Postal code"],
-              ] as Array<[keyof typeof empty, string]>
-            ).map(([key, label]) => (
-              <TextField
-                key={key}
-                label={label}
-                name={`port-${key}`}
-                autoComplete={
-                  key === "accountNumber" || key === "pin"
-                    ? "new-password"
-                    : "off"
-                }
-                value={form[key]}
-                onChange={(event) => set(key, event.target.value)}
-                type={
-                  key === "accountNumber" || key === "pin" ? "password" : "text"
-                }
-                multiline={key === "numbers"}
-              />
-            ))}
-            <Button
-              variant="contained"
-              disabled={saving || !form.customerId || !form.carrierAccountId}
-              onClick={() => void save()}
-            >
-              Save draft
-            </Button>
+              {draftStep < 2 && (
+                <Button
+                  variant="contained"
+                  disabled={
+                    draftStep === 0
+                      ? !form.customerId ||
+                        !form.carrierAccountId ||
+                        !form.numbers.trim() ||
+                        !form.currentProvider.trim() ||
+                        form.numbers
+                          .split(/[\s,;]+/)
+                          .filter(Boolean)
+                          .some((number) => !/^\+[1-9]\d{1,14}$/.test(number))
+                      : [
+                          form.accountName,
+                          form.accountNumber,
+                          form.line1,
+                          form.city,
+                          form.region,
+                          form.postalCode,
+                        ].some((value) => !value.trim())
+                  }
+                  onClick={() => setDraftStep((step) => step + 1)}
+                >
+                  Continue
+                </Button>
+              )}
+              {draftStep === 2 && (
+                <Button
+                  variant="contained"
+                  disabled={
+                    saving || !form.customerId || !form.carrierAccountId
+                  }
+                  onClick={() => void save()}
+                >
+                  {saving ? "Saving draft…" : "Save draft"}
+                </Button>
+              )}
+            </Stack>
           </Stack>
         </Paper>
       )}
@@ -252,10 +402,9 @@ export function PortsPage() {
               <Typography sx={{ fontWeight: 700 }}>
                 {port.numbers.join(", ")}
               </Typography>
-              <Typography variant="body2">
-                {port.currentProvider} · {port.status.replaceAll("_", " ")}
-              </Typography>
+              <Typography variant="body2">{port.currentProvider}</Typography>
             </div>
+            <StatusBadge status={port.status} />
             <Button component={Link} to={`/ports/${port.id}`}>
               View request
             </Button>

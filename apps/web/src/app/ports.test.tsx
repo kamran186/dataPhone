@@ -99,8 +99,14 @@ it("creates a redacted port draft through the browser wizard", async () => {
     ["City", "Richmond"],
     ["State", "VA"],
     ["Postal code", "23220"],
-  ])
-    fireEvent.change(screen.getByLabelText(name), { target: { value } });
+  ]) {
+    fireEvent.change(screen.getByLabelText(new RegExp(`^${name}`)), {
+      target: { value },
+    });
+    if (name === "Current provider")
+      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  }
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
   await waitFor(() =>
     expect(request).toHaveBeenCalledWith(

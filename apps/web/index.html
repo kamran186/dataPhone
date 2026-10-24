@@ -3,7 +3,41 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>DataPhone</title>
+    <meta name="theme-color" content="#080f1e" />
+    <meta
+      name="description"
+      content="DataPhone — intelligent telecommunications inventory, ownership, and operations."
+    />
+    <title>DataPhone · Intelligent connections</title>
+    <script>
+      (function () {
+        var preference = "system";
+        try {
+          var saved = localStorage.getItem("dataphone-theme");
+          if (["light", "dark", "system"].includes(saved)) preference = saved;
+        } catch (_) {}
+        var mode =
+          preference === "system"
+            ? window.matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light"
+            : preference;
+        document.documentElement.setAttribute("data-dp-theme", mode);
+      })();
+    </script>
+    <style>
+      html {
+        background: #f5f7fb;
+        color-scheme: light;
+      }
+      html[data-dp-theme="dark"] {
+        background: #080f1e;
+        color-scheme: dark;
+      }
+      body {
+        margin: 0;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

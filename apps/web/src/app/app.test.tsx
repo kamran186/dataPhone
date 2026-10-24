@@ -65,7 +65,9 @@ it("hides user management and denies its route without permission", async () => 
   expect(
     await screen.findByText("You do not have access to this page."),
   ).toBeInTheDocument();
-  expect(screen.queryByRole("link", { name: "Users" })).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("link", { name: "Team & access" }),
+  ).not.toBeInTheDocument();
 });
 
 it("restores a browser session from the refresh cookie", async () => {
@@ -165,7 +167,7 @@ it("requires sign-in and then shows the protected overview", async () => {
   fireEvent.change(screen.getByRole("textbox", { name: /Work email/i }), {
     target: { value: "admin@example.test" },
   });
-  fireEvent.change(screen.getByLabelText(/Password/i), {
+  fireEvent.change(screen.getByLabelText(/^Password/i), {
     target: { value: "correct horse battery staple 42" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
@@ -176,9 +178,11 @@ it("requires sign-in and then shows the protected overview", async () => {
   expect(
     screen.getByRole("navigation", { name: "Main navigation" }),
   ).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "Users" })).toBeInTheDocument();
+  expect(
+    screen.getByRole("link", { name: "Team & access" }),
+  ).toBeInTheDocument();
   await waitFor(() =>
-    expect(screen.getByText("Connected")).toBeInTheDocument(),
+    expect(screen.getByText("API connected")).toBeInTheDocument(),
   );
 });
 
@@ -217,7 +221,9 @@ it("shows recent jobs to staff with job viewing permission", async () => {
   ).toBeInTheDocument();
   expect(await screen.findByText("system.noop")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Open navigation" }));
-  expect(screen.getByRole("link", { name: "Jobs" })).toBeInTheDocument();
+  expect(
+    screen.getByRole("link", { name: "Background jobs" }),
+  ).toBeInTheDocument();
 });
 
 it("shows synced numbers and their holding history", async () => {
@@ -492,6 +498,7 @@ it("assigns an inventory number to a selected customer", async () => {
   vi.stubGlobal("fetch", request);
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: "Assign number" }));
+  await screen.findByRole("option", { name: "Acme West" });
   fireEvent.change(screen.getByRole("combobox", { name: "Customer" }), {
     target: { value: "10bb07ef-2c43-5119-920c-da830352f069" },
   });
@@ -563,7 +570,8 @@ it("bulk assigns selected inventory numbers", async () => {
   fireEvent.click(
     screen.getByRole("checkbox", { name: "Select +18042121778" }),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Assign selected" }));
+  fireEvent.click(screen.getByRole("button", { name: /Assign selected/ }));
+  await screen.findByRole("option", { name: "Acme West" });
   fireEvent.change(screen.getByRole("combobox", { name: "Customer" }), {
     target: { value: "10bb07ef-2c43-5119-920c-da830352f069" },
   });

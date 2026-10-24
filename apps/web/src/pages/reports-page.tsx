@@ -1,7 +1,8 @@
 import {
   Alert,
   Button,
-  CircularProgress,
+  TableContainer,
+  Skeleton,
   MenuItem,
   Paper,
   Stack,
@@ -17,6 +18,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { authorizedFetch, getJson } from "../shared/api/client";
+import { DensityControl, SearchHighlight } from "../shared/ui/data-tools";
+import { StatusBadge } from "../shared/ui/status-badge";
 import { PageHeader } from "../shared/ui/page-header";
 
 const options = [
@@ -47,6 +50,7 @@ export function ReportsPage() {
   const [search, setSearch] = useState("");
   const [submitted, setSubmitted] = useState("");
   const [page, setPage] = useState(1);
+  const [compact, setCompact] = useState(false);
   const [error, setError] = useState("");
   const params = new URLSearchParams({ page: String(page), pageSize: "50" });
   if (submitted) params.set("search", submitted);
@@ -79,7 +83,12 @@ export function ReportsPage() {
         title="Reports"
         description="Search operational data and export the current report."
       />
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+      <Stack
+        direction={{ xs: "column", sm: "row" }}
+        useFlexGap
+        spacing={1}
+        sx={{ flexWrap: "wrap" }}
+      >
         <TextField
           select
           label="Report"
@@ -117,6 +126,17 @@ export function ReportsPage() {
         </Button>
         <Button onClick={() => void download("csv")}>Download CSV</Button>
         <Button onClick={() => void download("xlsx")}>Download Excel</Button>
+        {(submitted || search) && (
+          <Button
+            onClick={() => {
+              setSearch("");
+              setSubmitted("");
+              setPage(1);
+            }}
+          >
+            Reset search
+          </Button>
+        )}
       </Stack>
       {selected === "unassigned" && (
         <Alert severity="info">
@@ -125,34 +145,69 @@ export function ReportsPage() {
         </Alert>
       )}
       {error && <Alert severity="error">{error}</Alert>}
-      {report.isPending && <CircularProgress aria-label="Loading report" />}
+      {report.isPending && (
+        <Skeleton aria-label="Loading report" height={300} variant="rounded" />
+      )}
       {report.isError && (
         <Alert severity="error">Could not load this report.</Alert>
       )}
       {report.data && (
-        <Paper sx={{ overflowX: "auto" }}>
-          <Typography sx={{ p: 2 }}>{report.data.total} result(s)</Typography>
+        <Paper sx={{ overflow: "hidden" }}>
+          <Stack
+            direction="row"
+            sx={{
+              p: 2,
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 1,
+            }}
+          >
+            <Typography variant="body2">
+              {report.data.total} result(s)
+            </Typography>
+            <DensityControl compact={compact} onChange={setCompact} />
+          </Stack>
           {report.data.rows.length === 0 ? (
             <Typography sx={{ p: 2 }}>No matching records.</Typography>
           ) : (
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  {report.data.columns.map((column) => (
-                    <TableCell key={column}>{column}</TableCell>
-                  ))}
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {report.data.rows.map((row, index) => (
-                  <TableRow key={`${page}-${index}`}>
+            <TableContainer
+              sx={{ maxHeight: "65vh" }}
+              tabIndex={0}
+              role="region"
+              aria-label="Report data, scroll for more columns"
+            >
+              <Table
+                stickyHeader
+                size={compact ? "small" : "medium"}
+                sx={compact ? { "& td": { py: 0.8 } } : undefined}
+              >
+                <TableHead>
+                  <TableRow>
                     {report.data.columns.map((column) => (
-                      <TableCell key={column}>{row[column] ?? ""}</TableCell>
+                      <TableCell key={column}>{column}</TableCell>
                     ))}
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHead>
+                <TableBody>
+                  {report.data.rows.map((row, index) => (
+                    <TableRow key={`${page}-${index}`}>
+                      {report.data.columns.map((column) => (
+                        <TableCell key={column}>
+                          {column === "Status" && row[column] ? (
+                            <StatusBadge status={row[column]} />
+                          ) : (
+                            <SearchHighlight
+                              text={row[column] ?? ""}
+                              search={submitted}
+                            />
+                          )}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
           )}
           <Stack direction="row" spacing={1} sx={{ p: 2 }}>
             <Button

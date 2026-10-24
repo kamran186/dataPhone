@@ -16,6 +16,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAuthStore } from "../app/model/use-auth-store";
+import { StatusBadge } from "../shared/ui/status-badge";
+import { CopyAction } from "../shared/ui/data-tools";
 import { authorizedFetch, getJson } from "../shared/api/client";
 
 interface Customer {
@@ -123,7 +125,7 @@ export function CustomerDetailPage() {
           </Typography>
           <Paper sx={{ p: 2 }}>
             <Typography>External ID: {customer.data.externalId}</Typography>
-            <Typography>Status: {customer.data.status}</Typography>
+            <StatusBadge status={customer.data.status} />
             {canManage && (
               <Button
                 onClick={() => {
@@ -144,8 +146,15 @@ export function CustomerDetailPage() {
       )}
       {numbers.data?.items.map((number) => (
         <Paper key={number.id} sx={{ p: 2 }}>
-          <Link to={`/inventory/${number.id}`}>{number.e164}</Link> ·{" "}
-          {number.status}
+          <Stack
+            direction="row"
+            spacing={1}
+            sx={{ alignItems: "center", justifyContent: "space-between" }}
+          >
+            <Link to={`/inventory/${number.id}`}>{number.e164}</Link>
+            <CopyAction value={number.e164} />
+            <StatusBadge status={number.status} />
+          </Stack>
         </Paper>
       ))}
       {numbers.data && (
@@ -212,7 +221,11 @@ export function CustomerDetailPage() {
               </Typography>
               <Typography
                 component="pre"
-                sx={{ overflowX: "auto", whiteSpace: "pre-wrap" }}
+                sx={{
+                  overflowX: "auto",
+                  whiteSpace: "pre-wrap",
+                  overflowWrap: "anywhere",
+                }}
               >
                 {JSON.stringify({ previous: event.previous, next: event.next })}
               </Typography>

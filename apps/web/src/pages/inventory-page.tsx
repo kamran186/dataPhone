@@ -1,8 +1,14 @@
 import {
   Alert,
+  Box,
+  IconButton,
+  LinearProgress,
+  Tooltip,
+  Menu,
+  TableContainer,
+  Skeleton,
   Button,
   Checkbox,
-  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
@@ -26,6 +32,15 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuthStore } from "../app/model/use-auth-store";
 import { authorizedFetch, getJson } from "../shared/api/client";
+import {
+  DensityControl,
+  CopyAction,
+  SearchHighlight,
+} from "../shared/ui/data-tools";
+import { StatusBadge } from "../shared/ui/status-badge";
+import { Icon } from "../shared/ui/icon";
+import { useDebouncedValue } from "../shared/lib/use-debounced-value";
+import { NumberPreview } from "../features/number-preview/ui/number-preview";
 import { PageHeader } from "../shared/ui/page-header";
 
 interface NumberRow {
@@ -60,6 +75,15 @@ export function InventoryPage() {
   const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
   const canAssign = Boolean(user?.permissions.includes("numbers.assign"));
+  const [compact, setCompact] = useState(false);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [columnAnchor, setColumnAnchor] = useState<HTMLElement | null>(null);
+  const [columns, setColumns] = useState([
+    "status",
+    "carrier",
+    "customer",
+    "updated",
+  ]);
   const [search, setSearch] = useState("");
   const [customer, setCustomer] = useState("");
   const [carrier, setCarrier] = useState("");
@@ -71,7 +95,10 @@ export function InventoryPage() {
   const [bulkOpen, setBulkOpen] = useState(false);
   const [customerSearch, setCustomerSearch] = useState("");
   const [selectedCustomer, setSelectedCustomer] = useState("");
+  const [bulkSaving, setBulkSaving] = useState(false);
   const [bulkError, setBulkError] = useState("");
+  const debouncedSearch = useDebouncedValue(search);
+  const debouncedCustomer = useDebouncedValue(customer);
   const customerParams = new URLSearchParams({ page: "1", pageSize: "100" });
   if (customerSearch.length >= 2) customerParams.set("search", customerSearch);
   const params = new URLSearchParams({
@@ -79,8 +106,8 @@ export function InventoryPage() {
     pageSize: "50",
     sort,
   });
-  if (search) params.set("search", search);
-  if (customer) params.set("customer", customer);
+  if (debouncedSearch) params.set("search", debouncedSearch);
+  if (debouncedCustomer) params.set("customer", debouncedCustomer);
   if (carrier) params.set("carrier", carrier);
   if (status) params.set("status", status);
   const query = params.toString();
@@ -124,6 +151,8 @@ export function InventoryPage() {
   }
 
   async function bulkAssign() {
+    if (bulkSaving) return;
+    setBulkSaving(true);
     setBulkError("");
     try {
       const response = await authorizedFetch("/api/v1/assignments/bulk", {
@@ -145,6 +174,8 @@ export function InventoryPage() {
       setBulkError(
         error instanceof Error ? error.message : "Bulk assignment failed",
       );
+    } finally {
+      setBulkSaving(false);
     }
   }
 
@@ -201,7 +232,15 @@ export function InventoryPage() {
         </Alert>
       )}
       <Paper sx={{ p: 2 }}>
-        <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
+        <Stack
+          direction={{ xs: "column", md: "row" }}
+          spacing={2}
+          useFlexGap
+          sx={{
+            flexWrap: "wrap",
+            "& > .MuiTextField-root": { flex: 1, minWidth: 160 },
+          }}
+        >
           <TextField
             label="Number contains"
             value={search}
@@ -263,61 +302,214 @@ export function InventoryPage() {
             <MenuItem value="status">Status</MenuItem>
           </Select>
         </Stack>
-        <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
-          <Button onClick={() => void exportFile("csv")}>Export CSV</Button>
+        <Stack
+          direction="row"
+          spacing={1}
+          useFlexGap
+          sx={{ mt: 2, flexWrap: "wrap", alignItems: "center" }}
+        >
+          <Button
+            startIcon={<Icon name="download" sx={{ fontSize: 15 }} />}
+            onClick={() => void exportFile("csv")}
+          >
+            Export CSV
+          </Button>
           <Button onClick={() => void exportFile("xlsx")}>Export Excel</Button>
+          {(search || customer || carrier || status) && (
+            <Button
+              onClick={() => {
+                setSearch("");
+                setCustomer("");
+                setCarrier("");
+                setStatus("");
+                setPage(1);
+                setSelected([]);
+              }}
+            >
+              Reset filters
+            </Button>
+          )}
+          <Box sx={{ flex: 1 }} />
+          <Button
+            onClick={(event) => setColumnAnchor(event.currentTarget)}
+            startIcon={<Icon name="filter" sx={{ fontSize: 15 }} />}
+            aria-haspopup="menu"
+            aria-expanded={Boolean(columnAnchor)}
+          >
+            Columns
+          </Button>
+          <Menu
+            anchorEl={columnAnchor}
+            open={Boolean(columnAnchor)}
+            onClose={() => setColumnAnchor(null)}
+          >
+            {["status", "carrier", "customer", "updated"].map((column) => (
+              <MenuItem
+                key={column}
+                onClick={() =>
+                  setColumns((before) =>
+                    before.includes(column)
+                      ? before.filter((item) => item !== column)
+                      : [...before, column],
+                  )
+                }
+              >
+                <Checkbox
+                  checked={columns.includes(column)}
+                  size="small"
+                  sx={{ p: 0.5, mr: 1 }}
+                  slotProps={{
+                    input: { "aria-label": `Show ${column} column` },
+                  }}
+                />
+                {column[0].toUpperCase() + column.slice(1)}
+              </MenuItem>
+            ))}
+          </Menu>
+          <DensityControl compact={compact} onChange={setCompact} />
         </Stack>
       </Paper>
-      {numbers.isPending && <CircularProgress aria-label="Loading inventory" />}
+      {numbers.isPending && (
+        <Skeleton
+          aria-label="Loading inventory"
+          variant="rounded"
+          height={320}
+        />
+      )}
+      {numbers.isFetching && !numbers.isPending && (
+        <LinearProgress aria-label="Refreshing inventory" />
+      )}
       {numbers.isError && (
         <Alert severity="error">
           Unable to load inventory. Check the search filters.
         </Alert>
       )}
       {numbers.data && (
-        <Paper sx={{ overflowX: "auto" }}>
-          <Table aria-label="Inventory numbers">
-            <TableHead>
-              <TableRow>
-                {canAssign && <TableCell>Select</TableCell>}
-                <TableCell>Number</TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell>Carrier</TableCell>
-                <TableCell>Customer</TableCell>
-                <TableCell>Updated</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {numbers.data.items.map((number) => (
-                <TableRow key={number.id}>
-                  {canAssign && (
-                    <TableCell>
-                      <Checkbox
-                        disabled={
-                          number.status !== "active" ||
-                          Boolean(number.customerName)
-                        }
-                        checked={selected.includes(number.id)}
-                        onChange={() => toggleNumber(number.id)}
-                        slotProps={{
-                          input: { "aria-label": `Select ${number.e164}` },
-                        }}
-                      />
-                    </TableCell>
+        <Paper sx={{ overflow: "hidden" }}>
+          <TableContainer
+            sx={{ maxHeight: "70vh" }}
+            tabIndex={0}
+            role="region"
+            aria-label="Inventory table, scroll for more columns"
+          >
+            <Table
+              stickyHeader
+              size={compact ? "small" : "medium"}
+              sx={
+                compact ? { "& td": { py: 0.8 }, "& th": { py: 1 } } : undefined
+              }
+              aria-label="Inventory numbers"
+            >
+              <TableHead>
+                <TableRow>
+                  {canAssign && <TableCell>Select</TableCell>}
+                  <TableCell sortDirection={sort === "e164" ? "asc" : false}>
+                    <Button
+                      onClick={() => {
+                        setSort("e164");
+                        setPage(1);
+                      }}
+                      size="small"
+                      sx={{
+                        p: 0,
+                        minWidth: 0,
+                        color: "inherit",
+                        fontSize: "inherit",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      Number {sort === "e164" && "↑"}
+                    </Button>
+                  </TableCell>
+                  {columns.includes("status") && <TableCell>Status</TableCell>}
+                  {columns.includes("carrier") && (
+                    <TableCell>Carrier</TableCell>
                   )}
-                  <TableCell>
-                    <Link to={`/inventory/${number.id}`}>{number.e164}</Link>
-                  </TableCell>
-                  <TableCell>{number.status}</TableCell>
-                  <TableCell>{number.carrier ?? "—"}</TableCell>
-                  <TableCell>{number.customerName ?? "Unassigned"}</TableCell>
-                  <TableCell>
-                    {new Date(number.updatedAt).toLocaleString()}
-                  </TableCell>
+                  {columns.includes("customer") && (
+                    <TableCell>Customer</TableCell>
+                  )}
+                  {columns.includes("updated") && (
+                    <TableCell>Updated</TableCell>
+                  )}
+                  <TableCell align="right">Details</TableCell>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHead>
+              <TableBody>
+                {numbers.data.items.map((number) => (
+                  <TableRow key={number.id}>
+                    {canAssign && (
+                      <TableCell>
+                        <Checkbox
+                          disabled={
+                            number.status !== "active" ||
+                            Boolean(number.customerName)
+                          }
+                          checked={selected.includes(number.id)}
+                          onChange={() => toggleNumber(number.id)}
+                          slotProps={{
+                            input: { "aria-label": `Select ${number.e164}` },
+                          }}
+                        />
+                      </TableCell>
+                    )}
+                    <TableCell>
+                      <Stack
+                        direction="row"
+                        spacing={0.5}
+                        sx={{ alignItems: "center" }}
+                      >
+                        <Link
+                          to={`/inventory/${number.id}`}
+                          style={{
+                            fontFamily: "ui-monospace, monospace",
+                            textDecoration: "none",
+                            fontWeight: 600,
+                          }}
+                        >
+                          <SearchHighlight text={number.e164} search={search} />
+                        </Link>
+                        <CopyAction value={number.e164} />
+                      </Stack>
+                    </TableCell>
+                    {columns.includes("status") && (
+                      <TableCell>
+                        <StatusBadge status={number.status} />
+                      </TableCell>
+                    )}
+                    {columns.includes("carrier") && (
+                      <TableCell sx={{ textTransform: "capitalize" }}>
+                        {number.carrier ?? "—"}
+                      </TableCell>
+                    )}
+                    {columns.includes("customer") && (
+                      <TableCell>
+                        <SearchHighlight
+                          text={number.customerName ?? "Unassigned"}
+                          search={customer}
+                        />
+                      </TableCell>
+                    )}
+                    {columns.includes("updated") && (
+                      <TableCell sx={{ color: "text.secondary", fontSize: 11 }}>
+                        {new Date(number.updatedAt).toLocaleString()}
+                      </TableCell>
+                    )}
+                    <TableCell align="right">
+                      <Tooltip title="Preview number">
+                        <IconButton
+                          aria-label={`Preview ${number.e164}`}
+                          onClick={() => setPreview(number.id)}
+                          size="small"
+                        >
+                          <Icon name="chevron" sx={{ fontSize: 16 }} />
+                        </IconButton>
+                      </Tooltip>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
           {canAssign && (
             <Button
               sx={{ m: 2 }}
@@ -327,7 +519,7 @@ export function InventoryPage() {
                 setBulkOpen(true);
               }}
             >
-              Assign selected
+              Assign selected ({selected.length})
             </Button>
           )}
           {numbers.data.items.length === 0 && (
@@ -362,7 +554,7 @@ export function InventoryPage() {
             item.accounts.map((account) => (
               <Stack
                 key={account.id}
-                direction="row"
+                direction={{ xs: "column", sm: "row" }}
                 spacing={2}
                 sx={{ mt: 1, alignItems: "center" }}
               >
@@ -391,6 +583,7 @@ export function InventoryPage() {
           {issues.data.length} open reconciliation issues need review.
         </Alert>
       )}
+      <NumberPreview id={preview} onClose={() => setPreview(null)} />
       <Dialog
         open={bulkOpen}
         onClose={() => setBulkOpen(false)}
@@ -433,7 +626,7 @@ export function InventoryPage() {
           <Button onClick={() => setBulkOpen(false)}>Cancel</Button>
           <Button
             variant="contained"
-            disabled={!selectedCustomer}
+            disabled={!selectedCustomer || bulkSaving}
             onClick={() => void bulkAssign()}
           >
             Confirm bulk assignment

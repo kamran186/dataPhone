@@ -47,3 +47,51 @@ it("reconnects with the last persisted event ID and stops on completion", async 
   expect(calls[0].headers.Authorization).toBe("Bearer test-token");
   expect(calls[1].headers["Last-Event-ID"]).toBe("1");
 });
+
+it("ignores malformed or unrelated events without advancing the resume cursor", async () => {
+  const events: JobProgressEvent[] = [];
+  const valid = {
+    jobId: "job-1",
+    type: "succeeded",
+    progress: 100,
+    createdAt: "2026-10-24T09:00:00Z",
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      body: stream(
+        [
+          "id: 1\ndata: not-json\n\n",
+          `id: 2\ndata: ${JSON.stringify({ ...valid, jobId: "other-job" })}\n\n`,
+          `id: 3\ndata: ${JSON.stringify({ ...valid, progress: -5 })}\n\n`,
+          `id: 4\ndata: ${JSON.stringify(valid)}\n\n`,
+        ].join(""),
+      ),
+    })),
+  );
+  const states: string[] = [];
+  await subscribeJobEvents(
+    "job-1",
+    (event) => events.push(event),
+    new AbortController().signal,
+    (state) => states.push(state),
+  );
+  expect(events).toEqual([valid]);
+  expect(states).toEqual(["connecting", "connected", "complete"]);
+});
+
+it("stops reconnecting when the operator cannot access the job", async () => {
+  const request = vi.fn(async () => ({ ok: false, status: 403 }));
+  vi.stubGlobal("fetch", request);
+  const states: string[] = [];
+  await subscribeJobEvents(
+    "restricted-job",
+    vi.fn(),
+    new AbortController().signal,
+    (state) => states.push(state),
+  );
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(states).toEqual(["connecting", "unavailable"]);
+});

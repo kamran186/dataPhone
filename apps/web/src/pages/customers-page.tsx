@@ -1,7 +1,14 @@
 import {
   Alert,
   Button,
-  CircularProgress,
+  Box,
+  TableContainer,
+  Table,
+  TableHead,
+  TableBody,
+  TableRow,
+  TableCell,
+  Skeleton,
   Dialog,
   DialogActions,
   DialogContent,
@@ -16,6 +23,10 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuthStore } from "../app/model/use-auth-store";
 import { authorizedFetch, getJson } from "../shared/api/client";
+import { Icon } from "../shared/ui/icon";
+import { StatusBadge } from "../shared/ui/status-badge";
+import { SearchHighlight } from "../shared/ui/data-tools";
+import { useDebouncedValue } from "../shared/lib/use-debounced-value";
 import { PageHeader } from "../shared/ui/page-header";
 
 interface CustomerRow {
@@ -37,8 +48,11 @@ export function CustomersPage() {
   const [name, setName] = useState("");
   const [externalId, setExternalId] = useState("");
   const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState("");
+  const debouncedSearch = useDebouncedValue(search);
   const params = new URLSearchParams({ page: String(page), pageSize: "25" });
-  if (search.length >= 2) params.set("search", search);
+  if (debouncedSearch.length >= 2) params.set("search", debouncedSearch);
   const customers = useQuery({
     queryKey: ["customers", params.toString()],
     queryFn: () =>
@@ -48,16 +62,22 @@ export function CustomersPage() {
   });
 
   async function create() {
+    if (!name.trim() || !externalId.trim() || saving) return;
     setError("");
+    setSaving(true);
     try {
       const response = await authorizedFetch("/api/v1/customers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, externalId }),
+        body: JSON.stringify({
+          name: name.trim(),
+          externalId: externalId.trim(),
+        }),
       });
       if (!response.ok)
         throw new Error(`Customer could not be created (${response.status})`);
       setOpen(false);
+      setNotice("Customer created successfully.");
       setName("");
       setExternalId("");
       await queryClient.invalidateQueries({ queryKey: ["customers"] });
@@ -67,6 +87,8 @@ export function CustomersPage() {
           ? cause.message
           : "Customer could not be created",
       );
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -76,7 +98,7 @@ export function CustomersPage() {
         title="Customers"
         description="Manage customer records and assigned numbers."
       />
-      <Stack direction="row" spacing={2}>
+      <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
         <TextField
           size="small"
           label="Search customers"
@@ -87,36 +109,106 @@ export function CustomersPage() {
           }}
         />
         {canManage && (
-          <Button variant="contained" onClick={() => setOpen(true)}>
+          <Button
+            variant="contained"
+            startIcon={<Icon name="plus" sx={{ fontSize: 15 }} />}
+            onClick={() => {
+              setError("");
+              setOpen(true);
+            }}
+          >
             Add customer
           </Button>
         )}
       </Stack>
+      {notice && (
+        <Alert severity="success" onClose={() => setNotice("")}>
+          {notice}
+        </Alert>
+      )}
       {customers.isPending && (
-        <CircularProgress aria-label="Loading customers" />
+        <Skeleton
+          aria-label="Loading customers"
+          height={260}
+          variant="rounded"
+        />
       )}
       {customers.isError && (
         <Alert severity="error">Unable to load customers.</Alert>
       )}
       {customers.data && (
-        <Paper sx={{ p: 2 }}>
+        <Paper sx={{ overflow: "hidden", "& > .MuiStack-root": { p: 2 } }}>
           {customers.data.items.length === 0 && (
             <Typography>No customers match this search.</Typography>
           )}
-          {customers.data.items.map((customer) => (
-            <Stack
-              key={customer.id}
-              direction="row"
-              spacing={2}
-              sx={{ py: 1, alignItems: "center" }}
-            >
-              <Link to={`/customers/${customer.id}`}>{customer.name}</Link>
-              <Typography color="text.secondary">
-                {customer.externalId}
-              </Typography>
-              <Typography color="text.secondary">{customer.status}</Typography>
-            </Stack>
-          ))}
+          <TableContainer
+            tabIndex={0}
+            role="region"
+            aria-label="Customer records"
+            sx={{ maxHeight: "65vh" }}
+          >
+            <Table stickyHeader aria-label="Customers">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Customer</TableCell>
+                  <TableCell>External ID</TableCell>
+                  <TableCell>Status</TableCell>
+                  <TableCell align="right">Details</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {customers.data.items.map((customer) => (
+                  <TableRow key={customer.id}>
+                    <TableCell>
+                      <Box
+                        sx={{ display: "flex", alignItems: "center", gap: 1.5 }}
+                      >
+                        <Box
+                          sx={{
+                            bgcolor: "var(--dp-glow)",
+                            color: "primary.main",
+                            width: 30,
+                            height: 30,
+                            display: "grid",
+                            placeItems: "center",
+                            borderRadius: 1.5,
+                            fontWeight: 650,
+                          }}
+                        >
+                          {customer.name.slice(0, 1).toUpperCase()}
+                        </Box>
+                        <Link
+                          to={`/customers/${customer.id}`}
+                          style={{ textDecoration: "none", fontWeight: 600 }}
+                        >
+                          <SearchHighlight
+                            text={customer.name}
+                            search={search}
+                          />
+                        </Link>
+                      </Box>
+                    </TableCell>
+                    <TableCell sx={{ color: "text.secondary" }}>
+                      {customer.externalId}
+                    </TableCell>
+                    <TableCell>
+                      <StatusBadge status={customer.status} />
+                    </TableCell>
+                    <TableCell align="right">
+                      <Button
+                        component={Link}
+                        to={`/customers/${customer.id}`}
+                        aria-label={`View ${customer.name}`}
+                        sx={{ minWidth: 32 }}
+                      >
+                        <Icon name="chevron" sx={{ fontSize: 16 }} />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
           <Stack
             direction="row"
             spacing={1}
@@ -139,7 +231,7 @@ export function CustomersPage() {
       )}
       <Dialog
         open={open}
-        onClose={() => setOpen(false)}
+        onClose={() => !saving && setOpen(false)}
         fullWidth
         maxWidth="sm"
       >
@@ -161,7 +253,11 @@ export function CustomersPage() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={() => void create()}>
+          <Button
+            variant="contained"
+            disabled={saving || !name.trim() || !externalId.trim()}
+            onClick={() => void create()}
+          >
             Create customer
           </Button>
         </DialogActions>
